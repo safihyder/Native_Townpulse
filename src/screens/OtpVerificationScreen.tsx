@@ -39,85 +39,49 @@ export function OtpVerificationScreen({
   return (
     <AuthScaffold
       currentStepLabel={currentStepLabel}
-      subtitle={`We sent a 6-digit code to ${formatDisplayPhone(phoneNumber)}. Enter it below to continue.`}
-      title={
-        isGoogleLink
-          ? 'Finish linking your verified phone.'
-          : 'Enter the OTP to sign in.'
-      }>
+      subtitle={`We sent a 6-digit code to ${formatDisplayPhone(phoneNumber)}.`}
+      title="Enter 6 digit otp">
       <OtpBoxes onChangeText={onChangeOtp} value={otpValue} />
-
-      <Text style={styles.helperText}>
-        {isGoogleLink
-          ? 'Once verified, the same Firebase account will carry both Google and phone auth.'
-          : 'After verification, the app syncs your Firebase token with the existing TownPulse backend.'}
-      </Text>
 
       {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
-      <ActionButton
-        disabled={otpValue.length !== 6}
-        isLoading={isBusy}
-        label={isGoogleLink ? 'Verify and continue' : 'Verify OTP'}
-        onPress={onVerify}
-      />
-      <ActionButton
-        disabled={isBusy}
-        label="Resend OTP"
-        onPress={onResend}
-        variant="secondary"
-      />
-      <ActionButton
-        disabled={isBusy}
-        label="Back"
-        onPress={onBack}
-        variant="ghost"
-      />
-
-      <View style={styles.footerHint}>
-        <Text style={styles.footerHintTitle}>Tip</Text>
-        <Text style={styles.footerHintBody}>
-          Auto-read may fill the code for you on Android if Firebase and your
-          device configuration allow it.
-        </Text>
+      <View style={styles.buttonContainer}>
+        <ActionButton
+          disabled={otpValue.length !== 6}
+          isLoading={isBusy}
+          label={isGoogleLink ? 'Verify and continue' : 'Verify OTP'}
+          onPress={onVerify}
+        />
+        <ActionButton
+          disabled={isBusy}
+          label="Resend OTP"
+          onPress={onResend}
+          variant="secondary"
+        />
+        <ActionButton
+          disabled={isBusy}
+          label="Back"
+          onPress={onBack}
+          variant="ghost"
+        />
       </View>
     </AuthScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  helperText: {
-    color: theme.colors.ink500,
-    fontSize: theme.typography.small,
-    lineHeight: 20,
-    marginTop: theme.spacing.md,
-  },
   error: {
     color: theme.colors.danger,
     backgroundColor: theme.colors.brandPrimarySoft,
     borderRadius: theme.radius.md,
     padding: theme.spacing.md,
-    marginTop: theme.spacing.md,
+    marginVertical: theme.spacing.md,
     fontSize: theme.typography.small,
     fontWeight: '600',
   },
-  footerHint: {
-    marginTop: theme.spacing.lg,
-    padding: theme.spacing.lg,
-    borderRadius: theme.radius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.brandCard,
-  },
-  footerHintTitle: {
-    color: theme.colors.ink900,
-    fontSize: theme.typography.small,
-    fontWeight: '800',
-    marginBottom: theme.spacing.xs,
-  },
-  footerHintBody: {
-    color: theme.colors.ink500,
-    fontSize: theme.typography.small,
-    lineHeight: 20,
+  buttonContainer: {
+    gap: 12,
+    marginTop: 24,
   },
 });
+

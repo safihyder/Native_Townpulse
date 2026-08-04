@@ -11,9 +11,8 @@
 
 import React, {
   createContext, useCallback, useContext, useEffect, useRef, useState,
-} from 'react';
+} from 'react';  
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from 'react-native';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 export interface SelectedAddon {
@@ -32,24 +31,28 @@ export interface CartItem {
   variantName?: string;
   addons?: SelectedAddon[]; // selected addons for this line item
   addonTotal?: number;      // sum of addon prices × qty
+  image?: string;           // item image
 }
 
 interface CartState {
   restaurantId: string | null;
   restaurantName: string;
   items: CartItem[];
+  deliveryAddress?: any | null;
 }
 
 interface CartContextValue {
   cart: CartState;
   itemCount: number;
   subtotal: number;
-  /** Add or increment. Returns false if restaurant mismatch and user cancelled. */
+  /** Add or increment. Auto-clears cart if adding from a different restaurant. */
   addItem: (restaurantId: string, restaurantName: string, item: Omit<CartItem, 'quantity'>) => void;
   removeItem: (itemId: string) => void;
   setQty: (itemId: string, qty: number) => void;
   clearCart: () => void;
   getQty: (itemId: string) => number;
+  setDeliveryAddress: (address: any) => void;
+  isHydrated: boolean;
 }
 
 // ── Storage helpers ────────────────────────────────────────────────────────────
@@ -72,6 +75,7 @@ const CartContext = createContext<CartContextValue | null>(null);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = useState<CartState>({ restaurantId: null, restaurantName: '', items: [] });
+  const [isHydrated, setIsHydrated] = useState(false);
   const initialized = useRef(false);
 
   // Hydrate from storage on mount
@@ -79,6 +83,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     loadCart().then(saved => {
       setCart(saved);
       initialized.current = true;
+      setIsHydrated(true);
     });
   }, []);
 
@@ -89,21 +94,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const addItem = useCallback((restaurantId: string, restaurantName: string, item: Omit<CartItem, 'quantity'>) => {
     setCart(prev => {
-      // Different restaurant — ask user
+      // Different restaurant — auto-replace cart
       if (prev.restaurantId && prev.restaurantId !== restaurantId && prev.items.length > 0) {
-        Alert.alert(
-          'Start new cart?',
-          `Your cart has items from ${prev.restaurantName}. Remove them to add from ${restaurantName}?`,
-          [
-            { text: 'Keep current', style: 'cancel' },
-            {
-              text: 'Start new', style: 'destructive', onPress: () => {
-                setCart({ restaurantId, restaurantName, items: [{ ...item, quantity: 1 }] });
-              },
-            },
-          ],
-        );
-        return prev; // optimistic: keep old state until user confirms
+        return { ...prev, restaurantId, restaurantName, items: [{ ...item, quantity: 1 }] };
       }
 
       const existing = prev.items.find(i => i.itemId === item.itemId);
@@ -114,7 +107,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           items: prev.items.map(i => i.itemId === item.itemId ? { ...i, quantity: i.quantity + 1 } : i),
         };
       }
-      return { restaurantId, restaurantName, items: [...prev.items, { ...item, quantity: 1 }] };
+      return { ...prev, restaurantId, restaurantName, items: [...prev.items, { ...item, quantity: 1 }] };
     });
   }, []);
 
@@ -135,18 +128,28 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const clearCart = useCallback(() => {
-    setCart({ restaurantId: null, restaurantName: '', items: [] });
+    setCart(prev => ({ 
+      ...prev,
+      restaurantId: null, 
+      restaurantName: '', 
+      items: [] 
+      // Do NOT erase deliveryAddress!
+    }));
   }, []);
 
   const getQty = useCallback((itemId: string) => {
     return cart.items.find(i => i.itemId === itemId)?.quantity ?? 0;
   }, [cart.items]);
 
+  const setDeliveryAddress = useCallback((address: any) => {
+    setCart(prev => ({ ...prev, deliveryAddress: address }));
+  }, []);
+
   const itemCount = cart.items.reduce((s, i) => s + i.quantity, 0);
   const subtotal  = cart.items.reduce((s, i) => s + (i.price + (i.addonTotal ?? 0)) * i.quantity, 0);
 
   return (
-    <CartContext.Provider value={{ cart, itemCount, subtotal, addItem, removeItem, setQty, clearCart, getQty }}>
+    <CartContext.Provider value={{ cart, itemCount, subtotal, addItem, removeItem, setQty, clearCart, getQty, setDeliveryAddress, isHydrated }}>
       {children}
     </CartContext.Provider>
   );

@@ -1,6 +1,5 @@
 /**
  * OrderTrackingScreen.tsx — OTP display + Live delivery map via WebSocket
- * Mirrors DeliveryMapTab.tsx pattern: react-native-maps with animated marker
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -12,21 +11,23 @@ import {
   TouchableOpacity,
   View,
   Linking,
+  Image,
 } from 'react-native';
 import LeafletMap from '../../components/LeafletMap';
 import { appConfig } from '../../config/appConfig';
+import { CallIcon, MessageIcon } from '../../components/SvgIcons'; // We'll need to use text icons if these aren't available, but I'll use text fallbacks just in case
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface OrderDoc {
   _id: string;
   orderId: string;
   status: string;
-  items: { name: string; quantity: number }[];
+  items: { name: string; quantity: number; image?: string; variantName?: string; price?: number; finalPrice?: number; unitPrice?: number; pricing?: { finalPrice?: number; unitPrice?: number } }[];
   pricing: { grandTotal?: number; itemsTotal?: number };
   payment: { mode: string; status: string };
   delivery?: {
     otpCode?: string;
-    partner?: { name: string; phone: string; vehicleType?: string };
+    partner?: { name: string; phone: string; vehicleType?: string; photo?: string };
     routePreview?: {
       polyline?: string;
       origin?: { lat: number; lng: number };
@@ -54,19 +55,14 @@ type Props = {
   onBack: () => void;
 };
 
-const STATUS_STEPS = [
-  { key: 'PLACED',           label: 'Placed',      icon: '📝' },
-  { key: 'CONFIRMED',        label: 'Confirmed',   icon: '✅' },
-  { key: 'PREPARING',        label: 'Preparing',   icon: '🍳' },
-  { key: 'READY_FOR_PICKUP', label: 'Ready',       icon: '📦' },
-  { key: 'OUT_FOR_DELIVERY', label: 'On the way',  icon: '🛵' },
-  { key: 'DELIVERED',        label: 'Delivered',    icon: '🎉' },
-];
-
-function getStepIndex(status: string) {
-  const idx = STATUS_STEPS.findIndex(s => s.key === status);
-  return idx >= 0 ? idx : 0;
-}
+// Map backend statuses to our 3 horizontal steps
+const getStepProgress = (status: string) => {
+  if (['PLACED', 'CONFIRMED', 'ACCEPTED'].includes(status)) return 1;
+  if (['PREPARING', 'READY_FOR_PICKUP'].includes(status)) return 2;
+  if (['DISPATCHED', 'OUT_FOR_DELIVERY', 'ARRIVED'].includes(status)) return 3;
+  if (['DELIVERED'].includes(status)) return 4;
+  return 0; // Cancelled
+};
 
 /** Decode a Google-style encoded polyline string to lat/lng pairs */
 function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
@@ -96,10 +92,18 @@ export default function OrderTrackingScreen({ order: initialOrder, idToken, onBa
   );
 
   const isActive = !['DELIVERED', 'CANCELLED'].includes(order.status);
-  const otp = order.delivery?.otpCode;
   const pickup = order.fulfillment?.pickup?.coordinates;
   const customer = order.fulfillment?.address?.coordinates;
-  const stepIdx = getStepIndex(order.status);
+
+  const currentStep = getStepProgress(order.status);
+
+  // Formatting ETA time (e.g., "13:45")
+  const getEtaTime = () => {
+    if (!eta) return "Soon";
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + eta);
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  };
 
   // ── Fetch fresh order data ─────────────────────────────────────────────────
   const refreshOrder = useCallback(async () => {
@@ -117,10 +121,9 @@ export default function OrderTrackingScreen({ order: initialOrder, idToken, onBa
           setEta(json.order.delivery.tracking.etaMinutes);
         }
       }
-    } catch {}
+    } catch { }
   }, [order.orderId, idToken]);
 
-  // Initial fetch
   useEffect(() => { refreshOrder(); }, [refreshOrder]);
 
   // ── WebSocket for live tracking ────────────────────────────────────────────
@@ -146,11 +149,10 @@ export default function OrderTrackingScreen({ order: initialOrder, idToken, onBa
             if (t?.etaMinutes != null) setEta(t.etaMinutes);
           }
 
-          // Also handle status changes
           if (msg.type === 'order_updated' && msg.data?.orderId === order.orderId) {
             refreshOrder();
           }
-        } catch {}
+        } catch { }
       };
 
       ws.onclose = () => {
@@ -173,146 +175,185 @@ export default function OrderTrackingScreen({ order: initialOrder, idToken, onBa
     return () => clearInterval(interval);
   }, [isActive, refreshOrder]);
 
-  // ── Map region ─────────────────────────────────────────────────────────────
-  const mapCenter = partnerLoc ?? customer ?? pickup ?? { lat: 19.076, lng: 72.8777 };
 
-  const polylinePoints = decodePolyline(order.delivery?.routePreview?.polyline ?? '');
+  // Derived status text
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'PLACED': return 'Order placed';
+      case 'CONFIRMED': return 'Restaurant Confirmed!';
+      case 'ACCEPTED': return 'Restaurant accepted order';
+      case 'PREPARING': return 'Preparing food...';
+      case 'READY_FOR_PICKUP': return 'Order is ready for pickup';
+      case 'DISPATCHED':
+      case 'OUT_FOR_DELIVERY': return 'Delivery partner is on the way';
+      case 'ARRIVED': return 'Partner arrived at your location';
+      case 'DELIVERED': return 'Order Delivered successfully';
+      case 'CANCELLED': return 'Order Cancelled';
+      default: return 'Processing...';
+    }
+  };
+  const statusText = getStatusText(order.status);
 
   return (
     <View style={st.root}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFF" />
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
-      {/* Header */}
-      <View style={st.header}>
-        <TouchableOpacity onPress={onBack} style={st.backBtn} activeOpacity={0.8}>
-          <Text style={st.backIcon}>←</Text>
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={st.headerTitle}>Order #{order.orderId.slice(-8)}</Text>
-          <Text style={st.headerSub}>
-            {order.payment.mode === 'CASH' ? '💵 Cash on Delivery' : '💳 Online Payment'}
-          </Text>
-        </View>
-        {eta != null && isActive && (
-          <View style={st.etaBadge}>
-            <Text style={st.etaNum}>{eta}</Text>
-            <Text style={st.etaLabel}>min</Text>
-          </View>
-        )}
-      </View>
+      {/* Floating Back Button */}
+      <TouchableOpacity onPress={onBack} style={st.backBtn} activeOpacity={0.8} hitSlop={{ top: 30, bottom: 30, left: 30, right: 30 }}>
+        <Text style={st.backIcon}>‹</Text>
+      </TouchableOpacity>
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} bounces={false}>
+
         {/* ── MAP ──────────────────────────────────────────────────────────── */}
-        {isActive && order.fulfillment?.type === 'DELIVERY' && (
+        {order.fulfillment?.type === 'DELIVERY' ? (
           <View style={st.mapWrap}>
             <LeafletMap
-              tileUrl="https://api.olamaps.io/tiles/v1/styles/default-light-standard/{z}/{x}/{y}.png?api_key=W7wiwv4l2zbS091tTWFMriVUlkx4VE8A6izkx25d"
               partnerCoords={partnerLoc ? { latitude: partnerLoc.lat, longitude: partnerLoc.lng } : null}
-              pickupCoords={pickup} // Restaurant pin
-              dropoffCoords={customer} // Customer pin
-              routeOrigin={partnerLoc ?? pickup} // Route origin: Delivery boy
-              routeDestination={customer} // Route destination: Customer
-              polylinePoints={[]}
+              pickupCoords={pickup}
+              dropoffCoords={customer}
+              routeOrigin={partnerLoc ?? pickup}
+              routeDestination={customer}
+              polylinePoints={order.delivery?.routePreview?.polyline ? decodePolyline(order.delivery.routePreview.polyline) : []}
               bottomPadding={50}
             />
 
-            {!partnerLoc && (
+            {!partnerLoc && isActive && !order.delivery?.routePreview?.polyline && (
               <View style={st.mapOverlay}>
                 <Text style={st.mapOverlayText}>Waiting for delivery partner location…</Text>
               </View>
             )}
           </View>
-        )}
-
-        {/* ── OTP CARD ────────────────────────────────────────────────────── */}
-        {otp && isActive && (
-          <View style={st.otpCard}>
-            <View style={st.otpHeader}>
-              <Text style={st.otpLabel}>🔐 Delivery OTP</Text>
-              <Text style={st.otpHint}>Share with delivery partner</Text>
-            </View>
-            <View style={st.otpDigits}>
-              {otp.split('').map((digit, i) => (
-                <View key={i} style={st.otpBox}>
-                  <Text style={st.otpDigit}>{digit}</Text>
-                </View>
-              ))}
-            </View>
+        ) : (
+          <View style={st.mapWrapEmpty}>
+            <Text style={{ color: '#9CA3AF' }}>Takeaway / No Map Available</Text>
           </View>
         )}
 
-        {/* ── PARTNER INFO ─────────────────────────────────────────────────── */}
-        {order.delivery?.partner && isActive && (
-          <View style={st.partnerCard}>
-            <View style={st.partnerInfo}>
-              <Text style={st.partnerLabel}>Delivery Partner</Text>
-              <Text style={st.partnerName}>{order.delivery!.partner!.name}</Text>
-              {order.delivery!.partner!.vehicleType && (
-                <Text style={st.partnerVehicle}>{order.delivery!.partner!.vehicleType}</Text>
-              )}
-            </View>
-            {order.delivery?.partner?.phone ? (
-              <TouchableOpacity
-                style={st.callBtn}
-                onPress={() => Linking.openURL(`tel:${order.delivery!.partner!.phone}`)}
-              >
-                <Text style={st.callBtnText}>📞 Call</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        )}
+        {/* ── OVERLAPPING CARD ──────────────────────────────────────────────── */}
+        <View style={st.floatingCard}>
 
-        {/* ── STATUS TIMELINE ─────────────────────────────────────────────── */}
-        <View style={st.timelineCard}>
-          <Text style={st.sectionLabel}>Order Status</Text>
-          {STATUS_STEPS.map((step, i) => {
-            const isDone = i <= stepIdx;
-            const isCurrent = i === stepIdx;
-            if (order.status === 'CANCELLED' && step.key !== 'PLACED') {
-              if (step.key === 'CONFIRMED') {
-                return (
-                  <View key="cancelled" style={st.timelineRow}>
-                    <View style={[st.dot, { backgroundColor: '#F5C116' }]} />
-                    <View style={st.timelineText}>
-                      <Text style={[st.timelineLabel, { color: '#F5C116', fontWeight: '800' }]}>❌ Cancelled</Text>
-                    </View>
-                  </View>
-                );
-              }
-              return null;
-            }
-            return (
-              <View key={step.key} style={st.timelineRow}>
-                {i < STATUS_STEPS.length - 1 && (
-                  <View style={[st.timelineLine, isDone && st.timelineLineDone]} />
-                )}
-                <View style={[st.dot, isDone && st.dotDone, (isCurrent && order.status !== 'DELIVERED') && st.dotCurrent]} />
-                <View style={st.timelineText}>
-                  <Text style={[st.timelineLabel, isDone && st.timelineLabelDone]}>
-                    {step.icon} {step.label}
-                  </Text>
-                </View>
+          {/* Top ETA Pill */}
+          {isActive && (
+            <View style={st.etaPillContainer}>
+              <View style={st.etaPill}>
+                <Text style={st.etaPillText}>Est. Time {getEtaTime()}</Text>
               </View>
-            );
-          })}
-        </View>
-
-        {/* ── ORDER SUMMARY ───────────────────────────────────────────────── */}
-        <View style={st.summaryCard}>
-          <Text style={st.sectionLabel}>Order Summary</Text>
-          {order.items.map((item, i) => (
-            <View key={i} style={st.summaryRow}>
-              <Text style={st.summaryItemName}>{item.name}</Text>
-              <Text style={st.summaryItemQty}>×{item.quantity}</Text>
             </View>
-          ))}
-          <View style={st.totalRow}>
-            <Text style={st.totalLabel}>Total</Text>
-            <Text style={st.totalValue}>₹{order.pricing?.grandTotal ?? order.pricing?.itemsTotal ?? 0}</Text>
-          </View>
-        </View>
+          )}
 
-        <View style={{ height: 40 }} />
+          <Text style={st.statusTitle}>{statusText}</Text>
+
+          {/* Horizontal Timeline */}
+          {order.status !== 'CANCELLED' && (
+            <View style={st.timelineRow}>
+              {/* Step 1 */}
+              <View style={st.stepNode}>
+                <View style={[st.circle, currentStep >= 1 && st.circleActive]}>
+                  {currentStep >= 1 ? <Text style={st.checkIcon}>✓</Text> : null}
+                </View>
+                <Text style={[st.stepText, currentStep >= 1 && st.stepTextActive]}>In process</Text>
+                <Text style={st.stepTime}>{/* Can add actual timestamps if backend provides */}</Text>
+              </View>
+
+              <View style={[st.line, currentStep >= 2 && st.lineActive]} />
+
+              {/* Step 2 */}
+              <View style={st.stepNode}>
+                <View style={[st.circle, currentStep >= 2 && st.circleActive]}>
+                  {currentStep >= 2 ? <Text style={st.checkIcon}>✓</Text> : null}
+                </View>
+                <Text style={[st.stepText, currentStep >= 2 && st.stepTextActive]}>Prepare food</Text>
+              </View>
+
+              <View style={[st.line, currentStep >= 3 && st.lineActive]} />
+
+              {/* Step 3 */}
+              <View style={st.stepNode}>
+                <View style={[st.circle, currentStep >= 3 && st.circleActive]}>
+                  {currentStep >= 3 ? <Text style={st.checkIcon}>✓</Text> : null}
+                </View>
+                <Text style={[st.stepText, currentStep >= 3 && st.stepTextActive]}>On the way</Text>
+              </View>
+
+              <View style={[st.line, currentStep >= 4 && st.lineActive]} />
+
+              {/* Step 4 */}
+              <View style={st.stepNode}>
+                <View style={[st.circle, currentStep >= 4 && st.circleActive]}>
+                  {currentStep >= 4 ? <Text style={st.checkIcon}>✓</Text> : null}
+                </View>
+                <Text style={[st.stepText, currentStep >= 4 && st.stepTextActive]}>Success</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Driver Information */}
+          {order.delivery?.partner && (
+            <>
+              <Text style={st.sectionLabel}>Driver information</Text>
+              <View style={st.driverRow}>
+                <View style={st.driverAvatar}>
+                  <Text style={{ fontSize: 24 }}>👨‍🚀</Text>
+                </View>
+                <View style={st.driverDetails}>
+                  <Text style={st.driverName}>{order.delivery.partner.name}</Text>
+                  <Text style={st.driverVehicle}>{order.delivery.partner.vehicleType || 'Delivery Partner'}</Text>
+                </View>
+                {order.delivery.partner.phone ? (
+                  <View style={st.actionButtons}>
+                    <TouchableOpacity style={st.actionIcon} onPress={() => Linking.openURL(`tel:${order.delivery!.partner!.phone}`)}>
+                      <Text style={{ fontSize: 18 }}>📞</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={st.actionIcon} onPress={() => Linking.openURL(`sms:${order.delivery!.partner!.phone}`)}>
+                      <Text style={{ fontSize: 18 }}>💬</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+              </View>
+            </>
+          )}
+
+          {/* OTP Box (if active) */}
+          {order.delivery?.otpCode && isActive && (
+            <View style={st.otpCard}>
+              <Text style={st.otpLabel}>Delivery OTP</Text>
+              <Text style={st.otpDigit}>{order.delivery.otpCode}</Text>
+            </View>
+          )}
+
+          {/* Order Details */}
+          <View style={st.orderHeaderRow}>
+            <View>
+              <Text style={st.orderLabel}>Order ID</Text>
+              <Text style={st.orderIdValue}># {order.orderId}</Text>
+            </View>
+            <TouchableOpacity style={st.copyBtn}>
+              <Text style={{ fontSize: 20, color: '#9CA3AF' }}>⧉</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={st.itemsList}>
+            {order.items.map((item, i) => (
+              <View key={i} style={st.itemRow}>
+                <View style={st.itemImgPlaceholder}>
+                  {item.image ? (
+                    <Image source={{ uri: item.image }} style={st.itemImg} />
+                  ) : (
+                    <Text style={{ fontSize: 20 }}>🍲</Text>
+                  )}
+                </View>
+                <Text style={st.itemQty}>{item.quantity} x</Text>
+                <View style={st.itemInfo}>
+                  <Text style={st.itemName}>{item.name}</Text>
+                  {item.variantName ? <Text style={st.itemVariant}>{item.variantName}</Text> : null}
+                </View>
+                <Text style={st.itemPrice}>₹{item.itemTotal ?? ((item.pricing?.finalPrice ?? item.pricing?.unitPrice ?? item.finalPrice ?? item.unitPrice ?? item.price ?? 0) * item.quantity)}</Text>
+              </View>
+            ))}
+          </View>
+
+        </View>
       </ScrollView>
     </View>
   );
@@ -320,44 +361,30 @@ export default function OrderTrackingScreen({ order: initialOrder, idToken, onBa
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 const st = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#FFFBF0' },
+  root: { flex: 1, backgroundColor: '#F3F4F6' },
 
-  // Header
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: 52, paddingBottom: 14,
-    backgroundColor: '#FAE08B', borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
-  },
   backBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center',
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    zIndex: 10,
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 4,
   },
-  backIcon: { fontSize: 18, color: '#111', fontWeight: '700' },
-  headerTitle: { fontSize: 16, fontWeight: '800', color: '#111' },
-  headerSub: { fontSize: 12, color: '#6B7280', marginTop: 2 },
-  etaBadge: {
-    backgroundColor: '#F5C116', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 6,
-    alignItems: 'center',
-  },
-  etaNum: { color: '#FFF', fontSize: 18, fontWeight: '900' },
-  etaLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 10, fontWeight: '600' },
+  backIcon: { fontSize: 26, color: '#111', fontWeight: '500', marginTop: -2, marginLeft: -2 },
 
-  // Map
   mapWrap: {
-    height: 320,
-    marginHorizontal: 10,
-    marginVertical: 8,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#E5E7EB',
+    height: 480, // Takes up good portion of top screen
+    width: '100%',
     position: 'relative',
   },
-  map: { ...StyleSheet.absoluteFill },
-  scooterMarker: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center' },
-  pinMarker: {
-    backgroundColor: '#FAE08B', borderRadius: 20, padding: 4,
-    shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 4, elevation: 4,
-    shadowOffset: { width: 0, height: 2 },
+  mapWrapEmpty: {
+    height: 480,
+    width: '100%',
+    backgroundColor: '#E5E7EB',
+    justifyContent: 'center', alignItems: 'center',
   },
   mapOverlay: {
     ...StyleSheet.absoluteFill,
@@ -366,75 +393,138 @@ const st = StyleSheet.create({
   },
   mapOverlayText: { color: '#6B7280', fontSize: 13, fontWeight: '600' },
 
-  // OTP
-  otpCard: {
-    margin: 14, backgroundColor: '#FAE08B', borderRadius: 16, padding: 18,
-    borderWidth: 1.5, borderColor: '#F5C116', borderStyle: 'dashed',
+  // Floating Bottom Card
+  floatingCard: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    marginTop: -80, // Overlap the map
+    paddingHorizontal: 24,
+    paddingTop: 40,
+    paddingBottom: 40,
+    minHeight: 500,
+    shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 10,
   },
-  otpHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  otpLabel: { fontSize: 14, fontWeight: '800', color: '#111' },
-  otpHint: { fontSize: 11, color: '#9CA3AF' },
-  otpDigits: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
-  otpBox: {
-    width: 44, height: 52, borderRadius: 10,
-    backgroundColor: '#FEF2F2', borderWidth: 1.5, borderColor: '#FECACA',
+
+  etaPillContainer: {
+    alignItems: 'center',
+    marginTop: -60,
+    marginBottom: 20,
+    zIndex: 99,
+    elevation: 11,
+  },
+  etaPill: {
+    backgroundColor: '#1F2937',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 4, elevation: 4,
+  },
+  etaPillText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
+
+  statusTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#111',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+
+  // Horizontal Timeline
+  timelineRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 40,
+    paddingHorizontal: 10,
+  },
+  stepNode: {
+    alignItems: 'center',
+    width: 70,
+  },
+  circle: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 8,
+  },
+  circleActive: {
+    backgroundColor: '#10B981',
+  },
+  checkIcon: { color: '#FFF', fontSize: 12, fontWeight: 'bold' },
+  stepText: { fontSize: 12, color: '#9CA3AF', fontWeight: '600', textAlign: 'center' },
+  stepTextActive: { color: '#111' },
+  stepTime: { fontSize: 10, color: '#9CA3AF', marginTop: 4 },
+
+  line: {
+    flex: 1,
+    height: 2,
+    backgroundColor: '#E5E7EB',
+    marginTop: 11, // align with circle centers
+    marginHorizontal: 4,
+    borderStyle: 'dashed',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  lineActive: {
+    borderColor: '#10B981',
+  },
+
+  // Driver Info
+  sectionLabel: { fontSize: 14, fontWeight: '800', color: '#111', marginBottom: 16 },
+  driverRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  driverAvatar: {
+    width: 50, height: 50, borderRadius: 25,
+    backgroundColor: '#E5E7EB',
+    justifyContent: 'center', alignItems: 'center',
+    marginRight: 16,
+  },
+  driverDetails: { flex: 1 },
+  driverName: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 2 },
+  driverVehicle: { fontSize: 13, color: '#6B7280' },
+
+  actionButtons: { flexDirection: 'row', gap: 12 },
+  actionIcon: {
+    width: 40, height: 40, borderRadius: 20,
+    borderWidth: 1, borderColor: '#E5E7EB',
     justifyContent: 'center', alignItems: 'center',
   },
-  otpDigit: { fontSize: 22, fontWeight: '900', color: '#F5C116' },
 
-  // Partner Info
-  partnerCard: {
-    margin: 14, backgroundColor: '#FAE08B', borderRadius: 16, padding: 18,
-    flexDirection: 'row', alignItems: 'center'
-  },
-  partnerInfo: { flex: 1 },
-  partnerLabel: { fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 },
-  partnerName: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 2 },
-  partnerVehicle: { fontSize: 13, color: '#6B7280' },
-  callBtn: { backgroundColor: '#e0f2fe', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, marginLeft: 10 },
-  callBtnText: { color: '#0284c7', fontWeight: '700', fontSize: 13 },
-
-  // Timeline
-  timelineCard: {
-    margin: 14, backgroundColor: '#FAE08B', borderRadius: 16, padding: 18,
-  },
-  sectionLabel: { fontSize: 14, fontWeight: '800', color: '#111', marginBottom: 16 },
-  timelineRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, position: 'relative' },
-  timelineLine: {
-    position: 'absolute', left: 7, top: 18, width: 2, height: 24,
-    backgroundColor: '#E5E7EB',
-  },
-  timelineLineDone: { backgroundColor: '#F5C116' },
-  dot: {
-    width: 16, height: 16, borderRadius: 8,
-    backgroundColor: '#E5E7EB', borderWidth: 2, borderColor: '#E5E7EB',
-  },
-  dotDone: { backgroundColor: '#F5C116', borderColor: '#F5C116' },
-  dotCurrent: {
-    borderColor: '#F5C116', backgroundColor: '#FAE08B',
-    shadowColor: '#F5C116', shadowOpacity: 0.4, shadowRadius: 6, elevation: 4,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  timelineText: { flex: 1 },
-  timelineLabel: { fontSize: 13, fontWeight: '600', color: '#9CA3AF' },
-  timelineLabelDone: { color: '#111', fontWeight: '700' },
-
-  // Summary
-  summaryCard: {
-    marginHorizontal: 14, backgroundColor: '#FAE08B', borderRadius: 16, padding: 18,
-  },
-  summaryRow: {
+  // OTP
+  otpCard: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F9FAFB',
+    backgroundColor: '#FEF3C7', padding: 16, borderRadius: 12, marginBottom: 32,
   },
-  summaryItemName: { fontSize: 13, color: '#374151', flex: 1 },
-  summaryItemQty: { fontSize: 13, fontWeight: '700', color: '#6B7280' },
-  totalRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingTop: 12, marginTop: 4,
+  otpLabel: { fontSize: 14, fontWeight: '700', color: '#B45309' },
+  otpDigit: { fontSize: 18, fontWeight: '900', color: '#B45309', letterSpacing: 4 },
+
+  // Order Details
+  orderHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 24,
   },
-  totalLabel: { fontSize: 15, fontWeight: '800', color: '#111' },
-  totalValue: { fontSize: 15, fontWeight: '800', color: '#F5C116' },
+  orderLabel: { fontSize: 12, color: '#F5A623', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 },
+  orderIdValue: { fontSize: 16, fontWeight: '800', color: '#111' },
+  copyBtn: { padding: 4 },
+
+  itemsList: { gap: 20 },
+  itemRow: { flexDirection: 'row', alignItems: 'center' },
+  itemImgPlaceholder: {
+    width: 44, height: 44, borderRadius: 12,
+    backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center',
+    marginRight: 12, overflow: 'hidden'
+  },
+  itemImg: { width: '100%', height: '100%' },
+  itemQty: { fontSize: 14, fontWeight: '800', color: '#111', width: 28 },
+  itemInfo: { flex: 1 },
+  itemName: { fontSize: 14, fontWeight: '800', color: '#111', marginBottom: 2 },
+  itemVariant: { fontSize: 12, color: '#6B7280' },
+  itemPrice: { fontSize: 15, fontWeight: '800', color: '#111' },
+
 });
-
-

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +9,8 @@ import {
   View,
 } from 'react-native';
 import { appConfig } from '../../config/appConfig';
+import { useToast } from '../../context/ToastContext';
+import { PressableScale } from '../../components/PressableScale';
 
 type Props = {
   idToken: string;
@@ -19,6 +20,7 @@ type Props = {
 type AppType = 'restaurant' | 'delivery' | null;
 
 export default function ApplicationFormScreen({ idToken, onBack }: Props) {
+  const { showToast } = useToast();
   const [appType, setAppType] = useState<AppType>(null);
   const [submitting, setSubmitting] = useState(false);
   const [existingApps, setExistingApps] = useState<any[]>([]);
@@ -63,14 +65,17 @@ export default function ApplicationFormScreen({ idToken, onBack }: Props) {
   const handleSubmit = async () => {
     if (appType === 'restaurant') {
       if (!rName || !rEmail || !rPhone || !rCuisine || !rStreet || !rCity) {
-        return Alert.alert('Error', 'Please fill all required fields');
+        showToast({ type: 'error', title: 'Error', body: 'Please fill all required fields' });
+        return;
       }
     } else if (appType === 'delivery') {
       if (!dVehicleNum || !dLicense || !dCnic) {
-        return Alert.alert('Error', 'Please fill all required fields');
+        showToast({ type: 'error', title: 'Error', body: 'Please fill all required fields' });
+        return;
       }
       if (dCnic.length !== 13) {
-        return Alert.alert('Error', 'Aadhar must be exactly 12 digits');
+        showToast({ type: 'error', title: 'Error', body: 'Aadhar must be exactly 12 digits' });
+        return;
       }
     }
 
@@ -102,12 +107,11 @@ export default function ApplicationFormScreen({ idToken, onBack }: Props) {
       
       if (!res.ok || !json.success) throw new Error(json.message);
 
-      Alert.alert('Success', json.message, [{ text: 'OK', onPress: () => {
-        setAppType(null);
-        fetchExistingApps();
-      }}]);
+      showToast({ type: 'success', title: 'Success', body: json.message });
+      setAppType(null);
+      fetchExistingApps();
     } catch (err: any) {
-      Alert.alert('Error', err.message);
+      showToast({ type: 'error', title: 'Error', body: err.message });
     } finally {
       setSubmitting(false);
     }
@@ -254,9 +258,9 @@ export default function ApplicationFormScreen({ idToken, onBack }: Props) {
           </View>
         )}
 
-        <TouchableOpacity style={st.submitBtn} onPress={handleSubmit} disabled={submitting}>
+        <PressableScale onPress={handleSubmit} disabled={submitting} style={st.submitBtn}>
           {submitting ? <ActivityIndicator color="#FFF" /> : <Text style={st.submitBtnText}>Submit Application</Text>}
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     </ScrollView>
   );

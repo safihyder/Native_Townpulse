@@ -37,13 +37,13 @@ export function PhoneEntryScreen({
       currentStepLabel={currentStepLabel}
       subtitle={
         isGoogleFlow
-          ? 'Your Google account is in, but TownPulse still needs a verified mobile number before moving ahead.'
-          : 'Enter your mobile number and Firebase will send a one-time password.'
+          ? 'We need a verified mobile number to finish setting up your account.'
+          : 'Enter your mobile number to receive a one-time password.'
       }
       title={
         isGoogleFlow
-          ? 'Verify your phone to finish Google sign-in.'
-          : 'Sign in with your mobile number.'
+          ? 'Verify your phone'
+          : 'Sign in'
       }>
       <TextField
         autoFocus
@@ -57,30 +57,23 @@ export function PhoneEntryScreen({
       />
 
       <Text style={styles.helperText}>
-        We keep the flow India-first for now. Enter a valid 10-digit number to
-        receive your OTP.
+        Enter a valid 10-digit number to receive your OTP.
       </Text>
 
       {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
-      <ActionButton
-        isLoading={isBusy}
-        label={isGoogleFlow ? 'Send verification OTP' : 'Send OTP'}
-        onPress={() => onSubmit(phoneValue)}
-      />
-      <ActionButton
-        disabled={isBusy}
-        label="Back"
-        onPress={onBack}
-        variant="ghost"
-      />
-
-      <View style={styles.noteCard}>
-        <Text style={styles.noteTitle}>Frontend-only setup</Text>
-        <Text style={styles.noteBody}>
-          This screen uses Firebase on mobile for OTP delivery. The backend is
-          untouched and only receives the verified Firebase ID token later.
-        </Text>
+      <View style={styles.buttonContainer}>
+        <ActionButton
+          isLoading={isBusy}
+          label={isGoogleFlow ? 'Send verification OTP' : 'Send OTP'}
+          onPress={() => onSubmit(phoneValue)}
+        />
+        <ActionButton
+          disabled={isBusy}
+          label="Back"
+          onPress={onBack}
+          variant="ghost"
+        />
       </View>
     </AuthScaffold>
   );
@@ -92,31 +85,19 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.small,
     lineHeight: 20,
     marginTop: theme.spacing.sm,
+    marginBottom: 16,
+  },
+  buttonContainer: {
+    gap: 12,
   },
   error: {
     color: theme.colors.danger,
     backgroundColor: theme.colors.brandPrimarySoft,
     borderRadius: theme.radius.md,
     padding: theme.spacing.md,
-    marginTop: theme.spacing.md,
+    marginBottom: theme.spacing.md,
     fontSize: theme.typography.small,
     fontWeight: '600',
   },
-  noteCard: {
-    marginTop: theme.spacing.lg,
-    padding: theme.spacing.lg,
-    borderRadius: theme.radius.lg,
-    backgroundColor: theme.colors.brandAccentSoft,
-  },
-  noteTitle: {
-    color: theme.colors.brandAccent,
-    fontSize: theme.typography.small,
-    fontWeight: '800',
-    marginBottom: theme.spacing.xs,
-  },
-  noteBody: {
-    color: theme.colors.ink700,
-    fontSize: theme.typography.small,
-    lineHeight: 20,
-  },
 });
+
