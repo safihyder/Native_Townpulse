@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -10,524 +10,797 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { getHomeBanners, getRestaurants } from '../../services/userApi';
+import LinearGradient from 'react-native-linear-gradient';
+import { getHomeBanners, getRestaurants, getCoupons } from '../../services/userApi';
 import { appConfig } from '../../config/appConfig';
 import { useRestaurantSocket } from '../../hooks/useRestaurantSocket';
 import { warmCache } from '../../services/searchCache';
 import SearchScreen from './SearchScreen';
+import { fetchLiveLocation, type LocationResult } from '../../services/locationService';
+import {
+  SearchIcon,
+  LocationPinIcon,
+  CartIcon,
+  ProfileIcon,
+  ChevronDownIcon,
+  StarIcon,
+  FilterIcon,
+  ArrowRightIcon,
+  ClockIcon,
+  DistanceIcon,
+  VoucherCategoryIcon,
+  RiceCategoryIcon,
+  DrinkCategoryIcon,
+  FastFoodCategoryIcon,
+  BreadCategoryIcon,
+} from '../../components/SvgIcons';
+
 
 const { width: SCREEN_W } = Dimensions.get('window');
-const BANNER_W = SCREEN_W - 32;
+const BANNER_W = SCREEN_W - 48;
 
-type Props = { idToken: string; userName: string; onOpenRestaurant: (id: string) => void };
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
-}
-
-// Cuisine → accent colour for card placeholder
-const CUISINE_COLORS: Record<string, [string, string]> = {
-  Burgers:    ['#FF6B35', '#FF8C42'],
-  Pizza:      ['#F5C116', '#E53935'],
-  'Fast Food':['#F57C00', '#FB8C00'],
-  Chinese:    ['#D32F2F', '#EF5350'],
-  Indian:     ['#6A1B9A', '#8E24AA'],
-  Healthy:    ['#2E7D32', '#43A047'],
-  Noodles:    ['#1565C0', '#1976D2'],
-  Desserts:   ['#AD1457', '#D81B60'],
-  default:    ['#37474F', '#546E7A'],
+type Props = {
+  idToken: string;
+  userName: string;
+  cartItemCount?: number;
+  onOpenRestaurant: (id: string, itemId?: string) => void;
+  onOpenCart?: () => void;
+  onOpenProfile?: () => void;
+  onOpenOrders?: () => void;
+  onOpenTracking?: (order: any) => void;
 };
 
-function cuisineColor(cuisines: string[]): [string, string] {
-  for (const c of cuisines) {
-    if (CUISINE_COLORS[c]) return CUISINE_COLORS[c];
-  }
-  return CUISINE_COLORS.default;
-}
+// ── Category data ────────────────────────────────────────────────────────────
+const CATEGORIES = [
+  { label: 'Voucher', icon: VoucherCategoryIcon, color: '#FFF3E0' },
+  { label: 'Rice', icon: RiceCategoryIcon, color: '#FFF3E0' },
+  { label: 'Drink', icon: DrinkCategoryIcon, color: '#E3F2FD' },
+  { label: 'Fast food', icon: FastFoodCategoryIcon, color: '#FFF3E0' },
+  { label: 'Bread', icon: BreadCategoryIcon, color: '#FBE9E7' },
+];
 
-// ── Banner Slide ──────────────────────────────────────────────────────────────
-function BannerSlide({ item }: { item: any }) {
-  const [g1, g2] = item.gradient ?? ['#E53935', '#B71C1C'];
-  return (
-    <View style={[bannerSt.slide, { backgroundColor: g1, width: BANNER_W }]}>
-      <View style={[bannerSt.slideOverlay, { backgroundColor: g2 }]} />
-      <View style={bannerSt.decor1} />
-      <View style={bannerSt.decor2} />
-      <View style={bannerSt.content}>
-        <Text style={bannerSt.emoji}>{item.emoji ?? '🎉'}</Text>
-        <Text style={bannerSt.title}>{item.title}</Text>
-        <Text style={bannerSt.sub}>{item.subtitle}</Text>
-      </View>
-    </View>
-  );
-}
+// ── Voucher card colors ──────────────────────────────────────────────────────
+const VOUCHER_COLORS = [
+  { bg: '#E8F5E9', accent: '#4CAF50' },
+  { bg: '#FFF3E0', accent: '#F5A623' },
+  { bg: '#E3F2FD', accent: '#2196F3' },
+  { bg: '#FCE4EC', accent: '#E91E63' },
+];
 
-// ── Category Chip ─────────────────────────────────────────────────────────────
-function CategoryChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={[chipSt.chip, active && chipSt.active]} onPress={onPress} activeOpacity={0.75}>
-      <Text style={[chipSt.label, active && chipSt.labelActive]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-// ── Restaurant Card ───────────────────────────────────────────────────────────
-function RestaurantCard({ restaurant, onPress, liveIsOpen }: { restaurant: any; onPress: () => void; liveIsOpen?: boolean }) {
-  // Use live socket status if available, fall back to API-computed isOpen
-  const isOpen = liveIsOpen !== undefined ? liveIsOpen : restaurant.isOpen !== false;
-  const cuisines: string[] = restaurant.cuisine ?? [];
-  const cuisineLabel = cuisines.slice(0, 2).join(' • ') || 'Restaurant';
-  const [c1, c2] = cuisineColor(cuisines);
-  const initial = (restaurant.name ?? 'R')[0].toUpperCase();
-
-  // Normalise banner to array
-  const banners: string[] = Array.isArray(restaurant.banner)
-    ? restaurant.banner.filter(Boolean)
-    : typeof restaurant.banner === 'string' && restaurant.banner
-      ? [restaurant.banner]
-      : [];
-
-  // Per-card carousel state
-  const [activeSlide, setActiveSlide] = useState(0);
-  const flatRef = useRef<FlatList>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const idxRef = useRef(0);
-
-  useEffect(() => {
-    if (banners.length < 2) return;
-    timerRef.current = setInterval(() => {
-      const next = (idxRef.current + 1) % banners.length;
-      idxRef.current = next;
-      flatRef.current?.scrollToIndex({ index: next, animated: true });
-      setActiveSlide(next);
-    }, 2500);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [banners.length]);
-
-  const CARD_W = Dimensions.get('window').width - 32; // section has 16px padding each side
-
-  return (
-    <TouchableOpacity style={cardSt.card} onPress={onPress} activeOpacity={0.88}>
-      {/* ── Banner Carousel ── */}
-      <View style={cardSt.imageBox}>
-        {banners.length > 0 ? (
-          <>
-            <FlatList
-              ref={flatRef}
-              data={banners}
-              keyExtractor={(_, i) => String(i)}
-              renderItem={({ item }) => (
-                <Image
-                  source={{ uri: item }}
-                  style={{ width: CARD_W, height: 148 }}
-                  resizeMode="cover"
-                />
-              )}
-              horizontal
-              pagingEnabled
-              scrollEnabled={false}
-              showsHorizontalScrollIndicator={false}
-              style={{ width: CARD_W, height: 148 }}
-              getItemLayout={(_, i) => ({ length: CARD_W, offset: CARD_W * i, index: i })}
-            />
-            {/* Slide dots */}
-            {banners.length > 1 && (
-              <View style={cardSt.dotsRow}>
-                {banners.map((_, i) => (
-                  <View key={i} style={[cardSt.dot, i === activeSlide && cardSt.dotActive]} />
-                ))}
-              </View>
-            )}
-          </>
-        ) : (
-          /* Gradient placeholder when no banners uploaded */
-          <View style={[cardSt.imagePlaceholder, { backgroundColor: c2 }]}>
-            <Text style={cardSt.imageLetter}>{initial}</Text>
-            <Text style={cardSt.imageCuisine}>{cuisines[0] ?? ''}</Text>
-          </View>
-        )}
-
-        {/* Closed overlay */}
-        {!isOpen && (
-          <View style={cardSt.closedOverlay}>
-            <Text style={cardSt.closedText}>CLOSED</Text>
-          </View>
-        )}
-        {/* Premium badge */}
-        {restaurant.flags?.isPremium && (
-          <View style={cardSt.premiumBadge}>
-            <Text style={cardSt.premiumText}>⭐ PREMIUM</Text>
-          </View>
-        )}
-      </View>
-
-      {/* ── Info ── */}
-      <View style={cardSt.info}>
-        <View style={cardSt.nameRow}>
-          <Text style={cardSt.name} numberOfLines={1}>{restaurant.name}</Text>
-          <View style={cardSt.ratingBadge}>
-            <Text style={cardSt.ratingStar}>★</Text>
-            <Text style={cardSt.ratingVal}>{Number(restaurant.rating || 0).toFixed(1)}</Text>
-          </View>
-        </View>
-        <Text style={cardSt.cuisine} numberOfLines={1}>{cuisineLabel}</Text>
-        <View style={cardSt.metaRow}>
-          <View style={[cardSt.metaChip, { backgroundColor: 'rgba(245,193,22,0.12)' }]}>
-            <Text style={[cardSt.metaText, { color: '#F5C116' }]}>🛵 ₹40</Text>
-          </View>
-          <View style={[cardSt.metaChip, { backgroundColor: 'rgba(229,57,53,0.12)' }]}>
-            <Text style={[cardSt.metaText, { color: '#E53935' }]}>⏱ 25–35 min</Text>
-          </View>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-}
+import { useCart } from '../../context/CartContext';
+import { LocationSelectorModal } from './LocationSelectorModal';
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export function UserHomeTab({ idToken, userName, onOpenRestaurant }: Props) {
+export function UserHomeTab({ idToken, userName, cartItemCount = 0, onOpenRestaurant, onOpenCart, onOpenProfile, onOpenOrders, onOpenTracking }: Props) {
+  const { setDeliveryAddress, cart, isHydrated } = useCart();
   const [banners, setBanners] = useState<any[]>([]);
   const [restaurants, setRestaurants] = useState<any[]>([]);
-  const [categories, setCategories] = useState<string[]>(['All']);
-  const [activeCategory, setActiveCategory] = useState('All');
-  const [activeBannerIdx, setActiveBannerIdx] = useState(0);
+  const [coupons, setCoupons] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchVisible, setSearchVisible] = useState(false);
-
-  // Live status + cache refresh from WebSocket
-  const { statusMap, onRestaurantUpdate } = useRestaurantSocket();
-
-  // Warm search cache on mount
-  useEffect(() => {
-    warmCache();
-  }, []);
-
-  const bannerRef = useRef<FlatList>(null);
-  const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const currentIdx = useRef(0);
-
+  const [locationSelectorVisible, setLocationSelectorVisible] = useState(false);
+  const [locationAddress, setLocationAddress] = useState('Loading...');
+  const [activeBannerIdx, setActiveBannerIdx] = useState(0);
   const [activeOrder, setActiveOrder] = useState<any>(null);
+
+  const fetchActiveOrder = useCallback(async () => {
+    try {
+      const res = await fetch(`${appConfig.apiBaseUrl}/api/orders/my-orders?t=${Date.now()}`, {
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+      });
+      const json = await res.json();
+      if (json.success && json.orders) {
+        const active = json.orders.find((o: any) => !['DELIVERED', 'CANCELLED', 'REJECTED'].includes(o.status));
+        setActiveOrder(active || null);
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }, [idToken]);
+
+  useEffect(() => {
+    fetchActiveOrder();
+    const interval = setInterval(fetchActiveOrder, 30000); // Polling every 30s
+    return () => clearInterval(interval);
+  }, [fetchActiveOrder]);
+
+  const { statusMap, onRestaurantUpdate } = useRestaurantSocket();
+  const bannerRef = useRef<FlatList>(null);
+  const [activeFilter, setActiveFilter] = useState('Near you');
+
+  // Initialize location from cache or fetch live
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    if (cart.deliveryAddress) {
+      setLocationAddress(cart.deliveryAddress.name === 'Current Location' ? cart.deliveryAddress.fullAddress : `${cart.deliveryAddress.name} - ${cart.deliveryAddress.fullAddress}`);
+    } else {
+      fetchLiveLocation()
+        .then((loc: LocationResult) => {
+          setLocationAddress(loc.address);
+          setDeliveryAddress({ name: 'Current Location', fullAddress: loc.address, lat: loc.coords.latitude, lng: loc.coords.longitude });
+        })
+        .catch(() => setLocationAddress('Enable location'));
+    }
+  }, [isHydrated, cart.deliveryAddress, setDeliveryAddress]);
+
+  useEffect(() => { warmCache(); }, []);
 
   const loadData = useCallback(async () => {
     try {
-      // Fetch each independently so one failure doesn't block the others
-      const [bannerRes, restRes, orderRes] = await Promise.all([
+      const [bannerRes, restRes, couponRes] = await Promise.all([
         getHomeBanners().catch(() => ({ banners: null })),
         getRestaurants({ limit: 50 }).catch(() => ({ restaurants: [] })),
-        fetch(`${appConfig.apiBaseUrl}/api/orders/my-orders`, { headers: { Authorization: `Bearer ${idToken}` } }).then(r => r.json()).catch(() => ({})),
+        getCoupons(idToken).catch(() => ({ coupons: [] })),
       ]);
       if (bannerRes.banners) setBanners(bannerRes.banners);
-      const rests: any[] = restRes.restaurants ?? [];
-      setRestaurants(rests);
-      const allCuisines = new Set<string>();
-      rests.forEach(r => (r.cuisine ?? []).forEach((c: string) => allCuisines.add(c)));
-      setCategories(['All', ...Array.from(allCuisines)]);
-      
-      if (orderRes?.success && orderRes.data?.length > 0) {
-        const active = orderRes.data.find((o: any) => !['DELIVERED', 'CANCELLED'].includes(o.status));
-        setActiveOrder(active || null);
-      } else {
-        setActiveOrder(null);
-      }
+      setRestaurants(restRes.restaurants ?? []);
+      setCoupons(couponRes.coupons ?? []);
     } catch { /* silent */ }
     finally { setLoading(false); }
   }, [idToken]);
 
-  // Wire up socket-triggered refresh (declared AFTER loadData)
   useEffect(() => {
     onRestaurantUpdate.current = () => { warmCache(true); loadData(); };
   }, [loadData, onRestaurantUpdate]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Auto-scroll
+  // Banner auto-scroll
   useEffect(() => {
     if (banners.length < 2) return;
-    autoScrollTimer.current = setInterval(() => {
-      const next = (currentIdx.current + 1) % banners.length;
-      currentIdx.current = next;
+    const timer = setInterval(() => {
+      const next = (activeBannerIdx + 1) % banners.length;
       bannerRef.current?.scrollToIndex({ index: next, animated: true });
-      setActiveBannerIdx(next); // ✅ update state so dots re-render
-    }, 3500);
-    return () => { if (autoScrollTimer.current) clearInterval(autoScrollTimer.current); };
-  }, [banners.length]);
+      setActiveBannerIdx(next);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [banners.length, activeBannerIdx]);
 
-  const filtered = activeCategory === 'All'
-    ? restaurants
-    : restaurants.filter(r => (r.cuisine ?? []).includes(activeCategory));
+  const filteredRestaurants = useMemo(() => {
+    switch (activeFilter) {
+      case 'Near you':
+        return restaurants;
+      case 'Hot Food':
+        return restaurants.filter(r => {
+          if (!r.cuisine) return true;
+          const lowerCuisines = r.cuisine.map((c: string) => c.toLowerCase());
+          return lowerCuisines.some((c: string) =>
+            c.includes('fast food') || c.includes('burger') || c.includes('pizza') ||
+            c.includes('indian') || c.includes('chinese') || c.includes('spicy') ||
+            c.includes('chicken')
+          );
+        });
+      case 'Promotion':
+        return restaurants.filter(r => (r.rating || 0) >= 4.3);
+      case 'Top rated':
+        return [...restaurants].sort((a, b) => (b.rating || 0) - (a.rating || 0)).filter(r => (r.rating || 0) >= 4.5);
+      default:
+        return restaurants;
+    }
+  }, [restaurants, activeFilter]);
 
   return (
     <View style={s.root}>
-      {/* ── Search Overlay ───────────────────────────────────── */}
       {searchVisible && (
         <SearchScreen
           onClose={() => setSearchVisible(false)}
-          onSelectRestaurant={(restaurantId) => {
+          onSelectRestaurant={(id, itemId) => {
             setSearchVisible(false);
-            onOpenRestaurant(restaurantId);
+            onOpenRestaurant(id, itemId);
           }}
         />
       )}
 
       {/* ── Header ─────────────────────────────────────────── */}
       <View style={s.header}>
-        <View style={s.headerTop}>
-          <View style={s.headerLeft}>
-            <Text style={s.greeting}>{getGreeting()}, {userName.split(' ')[0]} 👋</Text>
-            <TouchableOpacity style={s.locationRow} activeOpacity={0.7}>
-              <Text style={s.locationPin}>📍</Text>
-              <Text style={s.locationText} numberOfLines={1}>Mumbai, Maharashtra</Text>
-              <Text style={s.locationChevron}>▾</Text>
+        <View style={s.headerLeft}>
+          <LocationPinIcon size={28} color="#F5A623" />
+          <View style={s.headerLocationCol}>
+            <Text style={s.deliveryLabel}>Delivery to</Text>
+            <TouchableOpacity
+              style={s.locationRow}
+              activeOpacity={0.7}
+              onPress={() => setLocationSelectorVisible(true)}
+            >
+              <Text style={s.locationText} numberOfLines={1}>{locationAddress}</Text>
+              <ChevronDownIcon size={16} color="#F5A623" />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Search Bar — tappable, opens SearchScreen */}
-        <TouchableOpacity style={s.searchBar} activeOpacity={0.8} onPress={() => setSearchVisible(true)}>
-          <Text style={s.searchIcon}>🔍</Text>
-          <Text style={s.searchPlaceholder}>Search restaurants or dishes...</Text>
-        </TouchableOpacity>
+        <View style={s.headerRight}>
+          <TouchableOpacity style={s.iconBtn} onPress={onOpenCart} activeOpacity={0.7}>
+            <CartIcon size={22} color="#1C2434" />
+            {cartItemCount ? (cartItemCount > 0 ? (
+              <View style={s.cartBadge}>
+                <Text style={s.cartBadgeText}>{cartItemCount}</Text>
+              </View>
+            ) : null) : null}
+          </TouchableOpacity>
+          <TouchableOpacity style={s.iconBtn} onPress={onOpenProfile} activeOpacity={0.7}>
+            <ProfileIcon size={22} color="#1C2434" />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={s.scrollContent}
+        showsVerticalScrollIndicator={false}>
 
-        {/* ── Banner Carousel ─────────────────────────────── */}
-        {banners.length > 0 && (
-          <View style={s.bannerSection}>
-            <FlatList
-              ref={bannerRef}
-              data={banners}
-              keyExtractor={item => item.id}
-              renderItem={({ item }) => <BannerSlide item={item} />}
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              snapToInterval={BANNER_W + 12}
-              decelerationRate="fast"
-              ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
-              onMomentumScrollEnd={e => {
-                const idx = Math.round(e.nativeEvent.contentOffset.x / (BANNER_W + 12));
-                currentIdx.current = idx;
-                setActiveBannerIdx(idx); // ✅ user-swipe also updates dots
-              }}
-              getItemLayout={(_, i) => ({ length: BANNER_W + 12, offset: (BANNER_W + 12) * i, index: i })}
-            />
-            {/* Dots */}
-            <View style={s.dotsRow}>
-              {banners.map((_, i) => (
-                <View key={i} style={[s.dot, i === activeBannerIdx && s.dotActive]} />
-              ))}
-            </View>
-          </View>
-        )}
+        {/* ── Search Bar ────────────────────────────────────────────── */}
+        <View style={s.searchContainer}>
+          <TouchableOpacity style={s.searchBox} onPress={() => setSearchVisible(true)}>
+            <SearchIcon size={18} color="#1C2434" />
+            <Text style={s.searchPlaceholder}>Search drink, food...</Text>
+          </TouchableOpacity>
+        </View>
 
-        {loading && <View style={s.loadingBox}><ActivityIndicator color="#F5C116" size="large" /></View>}
-
-        {!loading && (
+        {loading ? (
+          <View style={s.loadingBox}><ActivityIndicator color="#F5A623" size="large" /></View>
+        ) : (
           <>
-            {/* ── Categories ──────────────────────────────── */}
-            <View style={s.section}>
-              <Text style={s.sectionTitle}>Browse by Category</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipsRow}>
-                {categories.map(cat => (
-                  <CategoryChip key={cat} label={cat} active={cat === activeCategory}
-                    onPress={() => setActiveCategory(cat)} />
-                ))}
+            {/* ── Banner Carousel ──────────────────────────── */}
+            {banners.length > 0 && (
+              <View style={s.bannerSection}>
+                <FlatList
+                  ref={bannerRef}
+                  data={banners}
+                  keyExtractor={item => item.id || item._id}
+                  renderItem={({ item }) => (
+                    <LinearGradient
+                      colors={item.gradient ?? ['#F5A623', '#F7C948']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={[s.bannerSlide, { width: BANNER_W }]}
+                    >
+                      <View style={s.bannerTextCol}>
+                        <Text style={s.bannerTitle}>{item.title}</Text>
+                        {item.subtitle ? <Text style={s.bannerSub}>{item.subtitle}</Text> : null}
+                      </View>
+                      {item.imageUrl ? (
+                        <Image source={{ uri: item.imageUrl }} style={s.bannerImage} resizeMode="contain" />
+                      ) : null}
+                    </LinearGradient>
+                  )}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  snapToInterval={BANNER_W + 16}
+                  decelerationRate="fast"
+                  ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
+                  onMomentumScrollEnd={e => {
+                    const idx = Math.round(e.nativeEvent.contentOffset.x / (BANNER_W + 16));
+                    setActiveBannerIdx(idx);
+                  }}
+                />
+                <View style={s.dotsRow}>
+                  {banners.map((_, i) => (
+                    <View key={i} style={[s.dot, i === activeBannerIdx && s.dotActive]} />
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {/* ── Filter Pills ───────────────────────────── */}
+            <View style={s.filterPillSection}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterPillRow}>
+                {['Near you', 'Hot Food', 'Promotion', 'Top rated'].map((filter) => {
+                  const isActive = activeFilter === filter;
+                  return (
+                    <TouchableOpacity
+                      key={filter}
+                      style={[s.filterPill, isActive && s.filterPillActive]}
+                      onPress={() => setActiveFilter(filter)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[s.filterPillTxt, isActive && s.filterPillTxtActive]}>{filter}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </View>
 
-            {/* ── Restaurants ─────────────────────────────── */}
+            {/* ── Top Discounts ─────────────────────────────── */}
             <View style={s.section}>
               <View style={s.sectionHeader}>
-                <Text style={s.sectionTitle}>{activeCategory === 'All' ? 'All Restaurants' : activeCategory}</Text>
-                <Text style={s.sectionCount}>{filtered.length} places</Text>
+                <Text style={s.sectionTitle}>Top discounts</Text>
+                <TouchableOpacity>
+                  <ArrowRightIcon size={20} color="#6B7280" />
+                </TouchableOpacity>
               </View>
-              {filtered.length === 0 ? (
+              <Text style={s.sectionSubtitle}>Best deals near you</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 16, paddingRight: 24 }}>
+                {restaurants.slice(0, 6).map(r => {
+                  const bannerImg = Array.isArray(r.banner) ? r.banner[0] : r.banner;
+                  return (
+                    <TouchableOpacity key={`disc-${r._id}`} style={s.discountCard} onPress={() => onOpenRestaurant(r.restaurantId)} activeOpacity={0.88}>
+                      <View style={s.discountImageBox}>
+                        {bannerImg ? (
+                          <Image source={{ uri: bannerImg }} style={s.discountImage} resizeMode="cover" />
+                        ) : (
+                          <View style={[s.discountImagePlaceholder]}>
+                            <Text style={s.discountImageLetter}>{(r.name ?? 'R')[0]}</Text>
+                          </View>
+                        )}
+                        <View style={s.promoBadge}>
+                          <Text style={s.promoBadgeText}>PROMO</Text>
+                        </View>
+                      </View>
+                      <Text style={s.discountName} numberOfLines={1}>{r.name}</Text>
+                      <Text style={s.discountCuisine} numberOfLines={1}>{(r.cuisine ?? []).slice(0, 2).join(' · ') || 'Restaurant'}</Text>
+                      <View style={s.discountMeta}>
+                        <StarIcon size={14} color="#F5A623" />
+                        <Text style={s.discountRating}>{Number(r.rating || 4.5).toFixed(1)}</Text>
+                        <Text style={s.discountReviews}>(100+)</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            {/* ── Top Voucher ──────────────────────────────── */}
+            {coupons.length > 0 ? (
+              <View style={s.section}>
+                <View style={s.sectionHeader}>
+                  <View>
+                    <Text style={s.sectionTitle}>Top voucher</Text>
+                    <Text style={s.sectionSubtitle}>We have {coupons.length} discount codes</Text>
+                  </View>
+                  <ArrowRightIcon size={20} color="#9CA3AF" />
+                </View>
+                <View style={s.voucherGrid}>
+                  {coupons.slice(0, 4).map((coupon, idx) => {
+                    const remaining = coupon.usageLimit ? Math.max(0, coupon.usageLimit - (coupon.usageCount || 0)) : 40;
+                    const isExhausted = remaining === 0;
+
+                    return (
+                      <View key={coupon._id || idx} style={[s.voucherCard, isExhausted && s.voucherCardExhausted]}>
+                        <View style={s.voucherCardLeft}>
+                          <Text style={[s.voucherDiscount, isExhausted && s.voucherDiscountExhausted]}>
+                            {coupon.type === 'percent' ? `${coupon.discount}%` : `$${coupon.discount}`}
+                          </Text>
+                          <Text style={s.voucherCode} numberOfLines={1}>
+                            Enter {coupon.code || 'PROMO'}
+                          </Text>
+                        </View>
+                        <View style={[s.voucherBadge, isExhausted && s.voucherBadgeExhausted]}>
+                          <Text style={s.voucherBadgeTxt}>X{remaining}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
+            {/* ── Near You / Filtered Items ─────────────────────────────────── */}
+            <View style={s.section}>
+              {restaurants.length === 0 ? (
                 <View style={s.empty}>
-                  <Text style={s.emptyEmoji}>🍽️</Text>
                   <Text style={s.emptyText}>No restaurants here yet</Text>
                 </View>
               ) : (
-                filtered.map(r => (
-                  <RestaurantCard
-                    key={r._id}
-                    restaurant={r}
-                    onPress={() => onOpenRestaurant(r.restaurantId)}
-                    liveIsOpen={statusMap[r.restaurantId]}
-                  />
-                ))
+                restaurants.map((r, idx) => {
+                  const bannerImg = Array.isArray(r.banner) ? r.banner[0] : r.banner;
+                  const isOpen = statusMap[r.restaurantId] !== undefined ? statusMap[r.restaurantId] : r.isOpen !== false;
+                  const pastelBgs = ['#A7F3D0', '#FDE68A', '#DDD6FE', '#FBCFE8', '#BAE6FD'];
+                  const bg = pastelBgs[idx % pastelBgs.length];
+
+                  return (
+                    <TouchableOpacity
+                      key={`near-${r._id}`}
+                      style={s.nearCard}
+                      onPress={() => onOpenRestaurant(r.restaurantId)}
+                      activeOpacity={0.88}
+                    >
+                      <View style={[s.nearImageBox, { backgroundColor: bannerImg ? '#F3F4F6' : bg }]}>
+                        {bannerImg ? (
+                          <Image source={{ uri: bannerImg }} style={s.nearImage} resizeMode="cover" />
+                        ) : (
+                          <View style={s.nearImagePlaceholder}>
+                            <Text style={s.nearImageLetter}>{(r.name ?? 'R')[0]}</Text>
+                          </View>
+                        )}
+                        {!isOpen && (
+                          <View style={s.closedTag}>
+                            <Text style={s.closedTagText}>CLOSED</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={s.nearInfo}>
+                        <Text style={s.nearName} numberOfLines={1}>{r.name}</Text>
+                        <Text style={s.nearCuisine} numberOfLines={1}>{(r.cuisine ?? []).join(', ') || 'Restaurant'}</Text>
+                        <View style={s.nearMeta}>
+                          <StarIcon size={14} color="#F5A623" />
+                          <Text style={s.nearRating}>{Number(r.rating || 4.5).toFixed(1)}</Text>
+                          <Text style={s.nearReviews}>(100+)</Text>
+                          <Text style={{ color: '#D1D5DB', fontSize: 12 }}>|</Text>
+                          <LocationPinIcon size={14} color="#1C2434" />
+                          <Text style={s.nearDistance}>1.2km</Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
               )}
             </View>
           </>
         )}
       </ScrollView>
 
-      {/* ── Active Order Banner ─────────────────────────────── */}
+      {/* ── Active Order Banner ────────────────────────────────── */}
       {activeOrder && (
-        <View style={s.activeOrderBanner}>
-          <View style={s.activeOrderBannerContent}>
-            <View style={s.activeOrderIconBox}>
+        <TouchableOpacity
+          style={s.activeOrderBanner}
+          onPress={() => onOpenTracking && onOpenTracking(activeOrder)}
+          activeOpacity={0.9}
+        >
+          <View style={s.activeOrderContent}>
+            <View style={s.activeOrderIconWrap}>
               <Text style={s.activeOrderIcon}>🛵</Text>
             </View>
-            <View style={s.activeOrderTextCol}>
-              <Text style={s.activeOrderTitle}>Track your order</Text>
-              <Text style={s.activeOrderStatus}>{activeOrder.status.replace(/_/g, ' ')}</Text>
+            <View style={s.activeOrderTextWrap}>
+              <Text style={s.activeOrderTitle}>
+                {(() => {
+                   const rId = activeOrder.restaurantId?._id || activeOrder.restaurantId;
+                   const r = restaurants.find(x => x.restaurantId === rId || x._id === rId);
+                   return r?.name ? `${r.name} Order` : 'Order in Progress';
+                })()}
+              </Text>
+              <Text style={s.activeOrderDesc}>
+                {activeOrder.status === 'PREPARING' ? 'Kitchen is preparing your food' :
+                  activeOrder.status === 'OUT_FOR_DELIVERY' ? 'Partner is on the way!' : 'Waiting for confirmation'}
+              </Text>
+              {activeOrder.pricing?.total && (
+                <Text style={{ color: '#F5A623', fontSize: 12, fontWeight: '700', marginTop: 4 }}>
+                  Total: ₹{activeOrder.pricing.total} • {activeOrder.items?.length || 1} items
+                </Text>
+              )}
             </View>
+            <ArrowRightIcon size={20} color="#FFF" />
           </View>
-        </View>
+        </TouchableOpacity>
       )}
+
+      <LocationSelectorModal
+        visible={locationSelectorVisible}
+        idToken={idToken}
+        onClose={() => setLocationSelectorVisible(false)}
+        onSelect={(addr) => {
+          setLocationAddress(addr.name === 'Current Location' ? addr.fullAddress : `${addr.name} - ${addr.fullAddress}`);
+          setDeliveryAddress(addr);
+          setLocationSelectorVisible(false);
+        }}
+      />
     </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#FFFBF0' },
-
-  activeOrderBanner: {
-    position: 'absolute', bottom: 16, left: 16, right: 16,
-    backgroundColor: '#FAE08B', borderRadius: 16,
-    shadowColor: '#F5C116', shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15, shadowRadius: 12, elevation: 8,
-    borderWidth: 2, borderColor: '#F5C116',
-  },
-  activeOrderBannerContent: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 },
-  activeOrderIconBox: { backgroundColor: 'rgba(245,193,22,0.15)', padding: 12, borderRadius: 12 },
-  activeOrderIcon: { fontSize: 24 },
-  activeOrderTextCol: { flex: 1 },
-  activeOrderTitle: { fontSize: 13, color: '#6B7280', fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
-  activeOrderStatus: { fontSize: 16, fontWeight: '800', color: '#111827' },
+  root: { flex: 1, backgroundColor: '#F7F8FA' },
 
   // Header
   header: {
-    backgroundColor: '#FAE08B',
-    paddingTop: 48, paddingHorizontal: 16, paddingBottom: 14,
-    gap: 10,
-    borderBottomWidth: 1, borderBottomColor: '#F3EFE6',
+    backgroundColor: '#FFFFFF',
+    paddingTop: 48,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  headerTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-  headerLeft: { flex: 1 },
-  greeting: { color: '#6B7280', fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  locationPin: { fontSize: 14 },
-  locationText: { color: '#111827', fontSize: 18, fontWeight: '800', flex: 1 },
-  locationChevron: { color: '#111827', fontSize: 16 },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  headerLocationCol: { flex: 1 },
+  deliveryLabel: {
+    color: '#9CA3AF',
+    fontSize: 11,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  locationText: {
+    color: '#1C2434',
+    fontSize: 15,
+    fontWeight: '700',
+    maxWidth: SCREEN_W * 0.5,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  iconBtn: {
+    width: 42,
+    height: 42,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 21,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  cartBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#EF4444',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cartBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
 
-  // Clean search bar
-  searchBar: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#FFFBF0', borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12,
-    borderWidth: 1, borderColor: '#F5C116',
+  filterPillSection: { marginBottom: 24, paddingLeft: 20 },
+  filterPillRow: { gap: 12, paddingRight: 20 },
+  filterPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
-  searchIcon: { fontSize: 16 },
-  searchPlaceholder: { fontSize: 14, color: '#9CA3AF', flex: 1 },
+  filterPillActive: {
+    backgroundColor: '#DBEAFE',
+  },
+  filterPillTxt: {
+    fontSize: 14,
+    color: '#4B5563',
+    fontWeight: '600',
+  },
+  filterPillTxtActive: {
+    color: '#2563EB',
+  },
+
+  searchContainer: { paddingHorizontal: 20, marginBottom: 24 },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    height: 48,
+    gap: 12,
+  },
+  searchPlaceholder: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
 
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 100 },
 
-  bannerSection: { paddingTop: 16, paddingLeft: 16 },
-  dotsRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 10, gap: 5 },
-  dot: { height: 6, width: 6, borderRadius: 3, backgroundColor: '#3A3A3A' },
-  dotActive: { backgroundColor: '#F5C116', width: 20, borderRadius: 3 },
+  bannerSection: { marginBottom: 28 },
+  bannerSlide: {
+    height: 140,
+    borderRadius: 16,
+    flexDirection: 'row',
+    padding: 20,
+    overflow: 'hidden',
+    marginLeft: 20,
+  },
+  bannerTextCol: { flex: 1, justifyContent: 'center' },
+  bannerTitle: { fontSize: 24, fontWeight: '900', color: '#FFF', marginBottom: 4 },
+  bannerSub: { fontSize: 14, color: '#FFF', opacity: 0.9, fontWeight: '500' },
+  bannerImage: { width: 100, height: 100, alignSelf: 'flex-end' },
+  dotsRow: { flexDirection: 'row', justifyContent: 'center', marginTop: 12, gap: 6, paddingRight: 20 },
+  dot: { height: 6, width: 6, borderRadius: 3, backgroundColor: '#E5E7EB' },
+  dotActive: { backgroundColor: '#F5A623', width: 20, borderRadius: 3 },
+
+  categorySection: { marginBottom: 24, paddingLeft: 20 },
+  categoryRow: { gap: 20, paddingRight: 20 },
+  categoryItem: { alignItems: 'center', width: 60 },
+  categoryCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  categoryLabel: { fontSize: 12, color: '#374151', fontWeight: '600', textAlign: 'center' },
+
+  section: { marginBottom: 28, paddingHorizontal: 20 },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  sectionTitle: { fontSize: 20, fontWeight: '900', color: '#1C2434' },
+  sectionSubtitle: { fontSize: 13, color: '#9CA3AF', fontWeight: '500', marginBottom: 16 },
 
   loadingBox: { paddingTop: 80, alignItems: 'center' },
 
-  section: { marginTop: 22, paddingHorizontal: 16 },
-  sectionHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14,
+  discountCard: {
+    width: 160,
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    overflow: 'hidden',
   },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 12 },
-  sectionCount: { fontSize: 13, color: '#6B7280', fontWeight: '600' },
-  chipsRow: { gap: 8, paddingBottom: 4 },
-  empty: { alignItems: 'center', paddingVertical: 40, backgroundColor: '#FAE08B', borderRadius: 16 },
-  emptyEmoji: { fontSize: 40, marginBottom: 8 },
-  emptyText: { color: '#6B7280', fontSize: 14 },
+  discountImageBox: {
+    height: 110,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  discountImage: { width: '100%', height: '100%' },
+  discountImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  discountImageLetter: { fontSize: 32, fontWeight: '900', color: '#D1D5DB' },
+  promoBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: '#EF4444',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  promoBadgeText: { color: '#FFF', fontSize: 10, fontWeight: '800' },
+  discountName: { fontSize: 14, fontWeight: '800', color: '#1C2434', marginTop: 8 },
+  discountCuisine: { fontSize: 12, color: '#9CA3AF', marginTop: 2, marginBottom: 6 },
+  discountMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  discountRating: { fontSize: 13, fontWeight: '800', color: '#1C2434' },
+  discountReviews: { fontSize: 12, color: '#9CA3AF' },
+
+  voucherGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  voucherCard: {
+    width: (SCREEN_W - 52) / 2,
+    height: 74,
+    backgroundColor: '#FDBA74',
+    borderRadius: 8,
+    flexDirection: 'row',
+    position: 'relative',
+  },
+  voucherCardExhausted: {
+    backgroundColor: '#D1D5DB',
+  },
+  voucherCardLeft: {
+    flex: 1,
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 8,
+    borderBottomLeftRadius: 8,
+    borderTopRightRadius: 16,
+    borderBottomRightRadius: 4,
+    marginTop: 2,
+    marginBottom: 2,
+    marginLeft: 2,
+    marginRight: 28,
+    paddingLeft: 12,
+    justifyContent: 'center',
+  },
+  voucherDiscount: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#F97316',
+  },
+  voucherDiscountExhausted: {
+    color: '#6B7280',
+  },
+  voucherCode: {
+    fontSize: 9,
+    color: '#111',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  voucherBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: '#EA580C',
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  voucherBadgeExhausted: {
+    backgroundColor: '#9CA3AF',
+  },
+  voucherBadgeTxt: {
+    color: '#FFF',
+    fontSize: 8,
+    fontWeight: '800',
+  },
+
+  nearCard: {
+    flexDirection: 'row',
+    backgroundColor: '#FFF',
+    marginBottom: 16,
+    alignItems: 'center',
+    gap: 16,
+  },
+  nearImageBox: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  nearImage: { width: '100%', height: '100%' },
+  nearImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  nearImageLetter: { fontSize: 32, fontWeight: '900', color: '#4B5563' },
+  closedTag: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closedTagText: { color: '#EF4444', fontSize: 10, fontWeight: '900' },
+  nearInfo: { flex: 1 },
+  nearName: { fontSize: 15, fontWeight: '800', color: '#1C2434', marginBottom: 2 },
+  nearCuisine: { fontSize: 12, color: '#9CA3AF', marginBottom: 6 },
+  nearMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  nearRating: { fontSize: 13, fontWeight: '800', color: '#1C2434' },
+  nearReviews: { fontSize: 12, color: '#9CA3AF' },
+  nearDot: { width: 3, height: 3, borderRadius: 2, backgroundColor: '#D1D5DB', marginHorizontal: 4 },
+  nearDistance: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
+
+  empty: { alignItems: 'center', paddingVertical: 40, backgroundColor: '#F9FAFB', borderRadius: 16 },
+  emptyText: { color: '#9CA3AF', fontSize: 14 },
+
+  activeOrderBanner: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    backgroundColor: '#1C2434',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  activeOrderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  activeOrderIconWrap: {
+    width: 40, height: 40,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 20,
+    justifyContent: 'center', alignItems: 'center',
+    marginRight: 12,
+  },
+  activeOrderIcon: { fontSize: 20 },
+  activeOrderTextWrap: { flex: 1 },
+  activeOrderTitle: { color: '#FFF', fontSize: 16, fontWeight: '800', marginBottom: 2 },
+  activeOrderDesc: { color: '#9CA3AF', fontSize: 13, fontWeight: '500' },
 });
-
-const bannerSt = StyleSheet.create({
-  slide: {
-    height: 148, borderRadius: 18, overflow: 'hidden',
-    justifyContent: 'flex-end', padding: 20, position: 'relative',
-  },
-  slideOverlay: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, top: '60%', opacity: 0.4, borderRadius: 18,
-  },
-  decor1: {
-    position: 'absolute', width: 140, height: 140, borderRadius: 70,
-    backgroundColor: 'rgba(245,193,22,0.08)', top: -30, right: -20,
-  },
-  decor2: {
-    position: 'absolute', width: 80, height: 80, borderRadius: 40,
-    backgroundColor: 'rgba(245,193,22,0.1)', top: 20, right: 70,
-  },
-  content: { zIndex: 2 },
-  emoji: { fontSize: 30, marginBottom: 4 },
-  title: { color: '#111827', fontSize: 21, fontWeight: '900', letterSpacing: 0.2 },
-  sub: { color: '#374151', fontSize: 13, fontWeight: '500', marginTop: 2 },
-});
-
-const chipSt = StyleSheet.create({
-  chip: {
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
-    backgroundColor: '#FAE08B', borderWidth: 1.5, borderColor: '#E5E7EB',
-  },
-  active: { backgroundColor: '#F5C116', borderColor: '#F5C116' },
-  label: { fontSize: 13, fontWeight: '700', color: '#374151' },
-  labelActive: { color: '#FFFBF0' },
-});
-
-const cardSt = StyleSheet.create({
-  card: {
-    backgroundColor: '#FAE08B', borderRadius: 16, marginBottom: 14, overflow: 'hidden',
-    shadowColor: '#F5C116', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15, shadowRadius: 8, elevation: 3,
-    borderWidth: 1, borderColor: '#F3EFE6',
-  },
-  imageBox: { height: 148, position: 'relative', justifyContent: 'center', alignItems: 'center' },
-  image: { position: 'absolute', width: '100%', height: '100%' },
-  imagePlaceholder: {
-    width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center', gap: 6,
-  },
-  imageLetter: { fontSize: 52, fontWeight: '900', color: 'rgba(255,255,255,0.9)' },
-  imageCuisine: { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.75)', letterSpacing: 1 },
-  closedOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center',
-  },
-  closedText: { color: '#E53935', fontSize: 22, fontWeight: '900', letterSpacing: 3 },
-  premiumBadge: {
-    position: 'absolute', top: 10, left: 10,
-    backgroundColor: '#F5C116', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6,
-  },
-  premiumText: { color: '#FFFBF0', fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  // Carousel dots inside each card
-  dotsRow: {
-    position: 'absolute', bottom: 8, left: 0, right: 0,
-    flexDirection: 'row', justifyContent: 'center', gap: 4,
-  },
-  dot: { height: 5, width: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
-  dotActive: { backgroundColor: '#F5C116', width: 14, borderRadius: 3 },
-  info: { padding: 14 },
-  nameRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4,
-  },
-  name: { fontSize: 16, fontWeight: '800', color: '#111827', flex: 1 },
-  ratingBadge: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#F5C116', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, gap: 3,
-  },
-  ratingStar: { color: '#FFFBF0', fontSize: 10 },
-  ratingVal: { color: '#FFFBF0', fontSize: 12, fontWeight: '800' },
-  cuisine: { fontSize: 13, color: '#6B7280', marginBottom: 10 },
-  metaRow: { flexDirection: 'row', gap: 8 },
-  metaChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  metaText: { fontSize: 12, fontWeight: '600' },
-});
-
-

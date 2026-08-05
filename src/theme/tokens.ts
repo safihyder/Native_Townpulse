@@ -6,10 +6,18 @@ export const theme = {
     brandPrimarySoft: 'rgba(245,193,22,0.12)', // Subtle gold tint
     brandAccent: '#F5C116',
     brandAccentSoft: 'rgba(245,193,22,0.08)',
-    brandCanvas: '#FFFBF0',         // Creamy warm white (10% yellow + 90% white)
-    brandCanvasDark: '#F3EFE6',     // Slightly darker creamy
-    brandCard: '#FAE08B',           // 30% yellow + 70% white
-    brandCardLight: '#FAE08B',      // Card bg
+    
+    // Backgrounds (Figma uses pure white for cards and backgrounds)
+    brandCanvas: '#FFFFFF',         // Pure white background
+    brandCanvasDark: '#FAFAFA',     // Slightly darker background
+    brandCard: '#FFFFFF',           // White cards
+    brandCardLight: '#FFFFFF',      // Card bg
+    
+    // New Figma semantic colors
+    accentOrange: '#F5A623',
+    bgSoftPink: '#FFF5F0',
+    promoGreen: '#34C759',
+    headerYellow: '#F5C116',
 
     // Text
     ink900: '#111827',              // Primary text (dark on light)
@@ -52,12 +60,19 @@ export const theme = {
   },
   shadow: {
     card: {
-      elevation: 8,
+      elevation: 4,
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.08,
+      shadowRadius: 12,
+    },
+    heavy: {
+      elevation: 12,
       shadowColor: '#F5C116',
       shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.15,
+      shadowOpacity: 0.25,
       shadowRadius: 16,
-    },
+    }
   },
 } as const;
 

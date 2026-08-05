@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
-import { theme } from '../../theme/tokens';
 import { getMyWallet, getWalletTransactions } from '../../services/deliveryApi';
+import { MoneyIcon, WalletIcon, AdjustmentsIcon, DocumentTextIcon } from '../../components/SvgIcons';
 
 type Props = { idToken: string };
 
@@ -17,7 +17,7 @@ function TxRow({ tx }: { tx: any }) {
   return (
     <View style={styles.txRow}>
       <View style={[styles.txIconBadge, isCODCash ? styles.txBadgeCash : styles.txBadgeCommission]}>
-        <Text style={styles.txIcon}>{isCODCash ? '💵' : isCommission ? '💰' : '🔧'}</Text>
+        {isCODCash ? <MoneyIcon size={20} color="#2563EB" /> : isCommission ? <WalletIcon size={20} color="#16A34A" /> : <AdjustmentsIcon size={20} color="#4B5563" />}
       </View>
       <View style={{ flex: 1, marginLeft: 12 }}>
         <Text style={styles.txDesc} numberOfLines={1}>{tx.description || tx.source}</Text>
@@ -28,7 +28,7 @@ function TxRow({ tx }: { tx: any }) {
         </Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
-        <Text style={[styles.txAmount, { color: tx.type === 'CREDIT' ? theme.colors.success : theme.colors.danger }]}>
+        <Text style={[styles.txAmount, { color: tx.type === 'CREDIT' ? '#22C55E' : '#EF4444' }]}>
           {tx.type === 'CREDIT' ? '+' : '-'}{formatCurrency(isCODCash ? tx.cashAmount : tx.amount)}
         </Text>
         {isCODCash && (
@@ -58,37 +58,36 @@ export function DeliveryWalletTab({ idToken }: Props) {
     })();
   }, [idToken]);
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color={theme.colors.brandPrimary} size="large" /></View>;
+  if (loading) return <View style={styles.center}><ActivityIndicator color="#F5A623" size="large" /></View>;
 
   const earnings = wallet?.earningsWallet || {};
   const cashWallet = wallet?.cashInHandWallet || {};
   const summary = wallet?.transactionSummary || {};
+  const meta = wallet?.meta || {};
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }}>
       <Text style={styles.pageTitle}>Wallet</Text>
 
       {/* Earnings Card */}
-      <View style={[styles.walletCard, styles.earningsCard]}>
-        <Text style={styles.walletCardLabel}>Earnings Balance</Text>
+      <View style={[styles.walletCard, styles.earningsCard, { backgroundColor: '#10B981' }]}>
+        <Text style={styles.walletCardLabel}>Distance Earnings</Text>
         <Text style={styles.walletCardAmount}>{formatCurrency(earnings.balance)}</Text>
+
+
         <View style={styles.walletCardRow}>
           <View style={styles.walletCardStat}>
-            <Text style={styles.walletStatLabel}>Online Orders</Text>
-            <Text style={styles.walletStatValue}>{formatCurrency(earnings.totalOnlineEarnings)}</Text>
+            <Text style={styles.walletStatLabel}>Total Distance</Text>
+            <Text style={styles.walletStatValue}>{meta.totalDistanceKm ?? 0} km</Text>
           </View>
           <View style={styles.walletCardDivider} />
           <View style={styles.walletCardStat}>
-            <Text style={styles.walletStatLabel}>COD Commission</Text>
-            <Text style={styles.walletStatValue}>{formatCurrency(earnings.totalCODCommissionEarnings)}</Text>
-          </View>
-          <View style={styles.walletCardDivider} />
-          <View style={styles.walletCardStat}>
-            <Text style={styles.walletStatLabel}>Total Earned</Text>
-            <Text style={styles.walletStatValue}>{formatCurrency(earnings.totalCredited)}</Text>
+            <Text style={styles.walletStatLabel}>Per Km Rate</Text>
+            <Text style={styles.walletStatValue}>₹{meta.perKmRate ?? 0}</Text>
           </View>
         </View>
       </View>
+
 
       {/* Cash in Hand Card */}
       <View style={[styles.walletCard, styles.cashCard]}>
@@ -116,7 +115,7 @@ export function DeliveryWalletTab({ idToken }: Props) {
       <Text style={styles.sectionTitle}>Transaction History</Text>
       {transactions.length === 0 ? (
         <View style={styles.emptyBox}>
-          <Text style={styles.emptyIcon}>📜</Text>
+          <DocumentTextIcon size={40} color="#9CA3AF" />
           <Text style={styles.emptyText}>No transactions yet</Text>
         </View>
       ) : (
@@ -129,32 +128,50 @@ export function DeliveryWalletTab({ idToken }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.brandCanvas },
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  pageTitle: { fontSize: theme.typography.h1, fontWeight: '800', color: theme.colors.ink900, margin: theme.spacing.lg, marginBottom: theme.spacing.sm },
-  walletCard: { marginHorizontal: theme.spacing.lg, borderRadius: theme.radius.md, padding: theme.spacing.lg, marginBottom: 14, ...theme.shadow.card },
-  earningsCard: { backgroundColor: theme.colors.brandPrimary },
-  cashCard: { backgroundColor: '#1e3a5f' },
-  walletCardLabel: { color: 'rgba(255,255,255,0.75)', fontSize: theme.typography.small, fontWeight: '600', marginBottom: 4 },
-  walletCardAmount: { color: '#fff', fontSize: 32, fontWeight: '900', marginBottom: 16 },
+  pageTitle: { fontSize: 28, fontWeight: '900', color: '#1C2434', marginHorizontal: 20, marginTop: 20, marginBottom: 16 },
+
+  walletCard: {
+    marginHorizontal: 20, borderRadius: 16, padding: 24, marginBottom: 14,
+    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 12, elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  earningsCard: { backgroundColor: '#F5A623' },
+  cashCard: { backgroundColor: '#1C2434' },
+  walletCardLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: '600', marginBottom: 4 },
+  walletCardAmount: { color: '#fff', fontSize: 34, fontWeight: '900', marginBottom: 20 },
   walletCardRow: { flexDirection: 'row', justifyContent: 'space-between' },
   walletCardDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.2)' },
   walletCardStat: { flex: 1, alignItems: 'center' },
   walletStatLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 10, fontWeight: '600', textAlign: 'center' },
   walletStatValue: { color: '#fff', fontSize: 14, fontWeight: '800', marginTop: 4 },
-  sectionTitle: { fontSize: theme.typography.h2, fontWeight: '700', color: theme.colors.ink900, marginHorizontal: theme.spacing.lg, marginBottom: 10 },
-  txList: { backgroundColor: '#FAE08B', marginHorizontal: theme.spacing.lg, borderRadius: theme.radius.md, ...theme.shadow.card, overflow: 'hidden' },
-  txRow: { flexDirection: 'row', alignItems: 'center', padding: theme.spacing.md, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  txIconBadge: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  txBadgeCash: { backgroundColor: '#dbeafe' },
-  txBadgeCommission: { backgroundColor: '#dcfce7' },
-  txIcon: { fontSize: 18 },
-  txDesc: { fontSize: theme.typography.small, fontWeight: '600', color: theme.colors.ink900 },
-  txMeta: { fontSize: theme.typography.micro, color: theme.colors.ink500, marginTop: 2 },
-  txAmount: { fontSize: theme.typography.body, fontWeight: '800' },
-  txSubAmount: { fontSize: theme.typography.micro, color: theme.colors.ink500 },
-  emptyBox: { alignItems: 'center', padding: 40, marginHorizontal: theme.spacing.lg, backgroundColor: '#FAE08B', borderRadius: theme.radius.md },
-  emptyIcon: { fontSize: 40 },
-  emptyText: { color: theme.colors.ink500, marginTop: 8 },
-});
 
+  sectionTitle: { fontSize: 20, fontWeight: '900', color: '#1C2434', marginHorizontal: 20, marginBottom: 12, marginTop: 8 },
+
+  txList: {
+    backgroundColor: '#FFFFFF', marginHorizontal: 20, borderRadius: 16,
+    shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 8, elevation: 2,
+    shadowOffset: { width: 0, height: 2 }, overflow: 'hidden',
+  },
+  txRow: {
+    flexDirection: 'row', alignItems: 'center', padding: 16,
+    borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
+  },
+  txIconBadge: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
+  txBadgeCash: { backgroundColor: '#DBEAFE' },
+  txBadgeCommission: { backgroundColor: '#DCFCE7' },
+  txIcon: { fontSize: 18 },
+  txDesc: { fontSize: 14, fontWeight: '700', color: '#1C2434' },
+  txMeta: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
+  txAmount: { fontSize: 15, fontWeight: '800' },
+  txSubAmount: { fontSize: 11, color: '#9CA3AF' },
+
+  emptyBox: {
+    alignItems: 'center', paddingVertical: 48, marginHorizontal: 20,
+    backgroundColor: '#F9FAFB', borderRadius: 16,
+    borderWidth: 1, borderColor: '#F3F4F6',
+  },
+  emptyIcon: { fontSize: 40 },
+  emptyText: { color: '#9CA3AF', marginTop: 8, fontSize: 15, fontWeight: '500' },
+});

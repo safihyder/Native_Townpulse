@@ -54,3 +54,23 @@ export const getOrderTracking = (id: string, token: string) =>
 
 /** POST /api/orders — Place a new order */
 export const placeOrder = (token: string, body: object) => post('/api/orders', body, token);
+
+/** GET /api/coupons — List active coupons/vouchers */
+export const getCoupons = (token: string) => get('/api/coupons', token);
+
+/** GET /api/auth/addresses — List user saved addresses */
+export const getAddresses = (token: string) => get('/api/auth/addresses', token);
+
+/** POST /api/auth/addresses — Add a new saved address */
+export const addAddress = (token: string, body: object) => post('/api/auth/addresses', body, token);
+
+/** DELETE /api/auth/addresses/:id — Delete a saved address */
+export const deleteAddress = async (token: string, id: string) => {
+  const res = await fetch(`${appConfig.apiBaseUrl}/api/auth/addresses/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.message || 'Failed to delete address');
+  return json;
+};

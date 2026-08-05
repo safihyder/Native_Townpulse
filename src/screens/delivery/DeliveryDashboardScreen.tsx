@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { theme } from '../../theme/tokens';
 import type { SyncedTownPulseSession } from '../../services/backendAuth';
 import { getFreshFirebaseIdToken } from '../../services/firebaseAuth';
 import { DeliveryHomeTab } from './DeliveryHomeTab';
@@ -9,6 +8,8 @@ import { DeliveryAnalyticsTab } from './DeliveryAnalyticsTab';
 import { DeliverySettingsTab } from './DeliverySettingsTab';
 
 
+import { ChartIcon, HomeIcon, SettingsIcon, WalletIcon } from '../../components/SvgIcons';
+
 type Tab = 'home' | 'wallet' | 'analytics' | 'settings';
 
 type Props = {
@@ -16,11 +17,11 @@ type Props = {
   onSignOut: () => void;
 };
 
-const TABS: { key: Tab; label: string; icon: string }[] = [
-  { key: 'home', label: 'Home', icon: '🏠' },
-  { key: 'wallet', label: 'Wallet', icon: '💰' },
-  { key: 'analytics', label: 'Stats', icon: '📊' },
-  { key: 'settings', label: 'Settings', icon: '⚙️' },
+const TABS: { key: Tab; label: string; icon: (color: string) => React.ReactNode }[] = [
+  { key: 'home', label: 'Home', icon: (color) => <HomeIcon size={26} color={color} strokeWidth={2.5} /> },
+  { key: 'wallet', label: 'Wallet', icon: (color) => <WalletIcon size={26} color={color} strokeWidth={2.5} /> },
+  { key: 'analytics', label: 'Stats', icon: (color) => <ChartIcon size={26} color={color} strokeWidth={2.5} /> },
+  { key: 'settings', label: 'Settings', icon: (color) => <SettingsIcon size={26} color={color} strokeWidth={2.5} /> },
 ];
 
 export function DeliveryDashboardScreen({ session, onSignOut }: Props) {
@@ -92,7 +93,9 @@ export function DeliveryDashboardScreen({ session, onSignOut }: Props) {
       {/* Top Bar */}
       <View style={styles.topBar}>
         <Text style={styles.brandName}>TownPulse</Text>
-        <Text style={styles.brandSub}>Delivery</Text>
+        <View style={styles.brandBadge}>
+          <Text style={styles.brandSub}>Delivery</Text>
+        </View>
       </View>
 
       {/* Tab Content */}
@@ -107,7 +110,9 @@ export function DeliveryDashboardScreen({ session, onSignOut }: Props) {
               key={tab.key}
               style={styles.navItem}
               onPress={() => setActiveTab(tab.key)}>
-              <Text style={[styles.navIcon, active && styles.navIconActive]}>{tab.icon}</Text>
+              <View style={[styles.navIcon, active && styles.navIconActive]}>
+                {tab.icon(active ? '#F5A623' : '#6B7280')}
+              </View>
               <Text style={[styles.navLabel, active && styles.navLabelActive]}>{tab.label}</Text>
               {active && <View style={styles.navDot} />}
             </TouchableOpacity>
@@ -119,52 +124,55 @@ export function DeliveryDashboardScreen({ session, onSignOut }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.brandCanvas },
+  root: { flex: 1, backgroundColor: '#F7F8FA' },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: 10,
-    backgroundColor: theme.colors.brandPrimary,
-    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+    gap: 10,
   },
-  brandName: { color: '#fff', fontSize: 20, fontWeight: '900', letterSpacing: 0.5 },
-  brandSub: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
-    fontWeight: '600',
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  brandName: { color: '#1C2434', fontSize: 20, fontWeight: '900', letterSpacing: 0.5 },
+  brandBadge: {
+    backgroundColor: '#F3F4F6',
     paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  brandSub: {
+    color: '#6B7280',
+    fontSize: 11,
+    fontWeight: '700',
   },
   content: { flex: 1 },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: theme.colors.ink500, fontSize: theme.typography.body },
+  loadingText: { color: '#9CA3AF', fontSize: 15 },
   bottomNav: {
     flexDirection: 'row',
-    backgroundColor: '#FAE08B',
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
+    borderTopColor: '#F3F4F6',
     paddingBottom: 8,
     elevation: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.05,
     shadowRadius: 12,
   },
   navItem: { flex: 1, alignItems: 'center', paddingTop: 10, position: 'relative' },
-  navIcon: { fontSize: 22, opacity: 0.5 },
-  navIconActive: { opacity: 1 },
-  navLabel: { fontSize: 10, color: theme.colors.ink500, fontWeight: '600', marginTop: 2 },
-  navLabelActive: { color: theme.colors.brandPrimary },
+  navIcon: { alignItems: 'center', justifyContent: 'center', height: 24 },
+  navIconActive: { },
+  navLabel: { fontSize: 10, color: '#9CA3AF', fontWeight: '600', marginTop: 2 },
+  navLabelActive: { color: '#F5A623', fontWeight: '700' },
   navDot: {
     position: 'absolute',
     bottom: 0,
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: theme.colors.brandPrimary,
+    backgroundColor: '#F5A623',
   },
 });
-

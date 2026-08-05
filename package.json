@@ -28,10 +28,13 @@
     "react-native-blob-util": "^0.24.7",
     "react-native-fs": "^2.20.0",
     "react-native-image-picker": "^8.2.1",
+    "react-native-linear-gradient": "^2.8.3",
     "react-native-maps": "^1.27.2",
     "react-native-razorpay": "^3.0.0",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-share": "^12.3.1",
+    "react-native-svg": "^15.15.5",
+    "react-native-video": "^6.19.2",
     "react-native-webview": "^13.16.1",
     "xlsx": "^0.18.5"
   },

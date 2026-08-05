@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, StyleSheet, Text, View, ScrollView } from 'react-native';
 
 import { theme } from '../theme/tokens';
 
@@ -15,7 +15,11 @@ type NativeBarChartProps = {
 
 export function NativeBarChart({ data, height = 160 }: NativeBarChartProps): React.JSX.Element {
   const maxValue = Math.max(...data.map(d => d.value), 1);
-  const animValues = useRef(data.map(() => new Animated.Value(0))).current;
+  const animValuesRef = useRef<Animated.Value[]>([]);
+  if (!animValuesRef.current || animValuesRef.current.length !== data.length) {
+    animValuesRef.current = data.map(() => new Animated.Value(0));
+  }
+  const animValues = animValuesRef.current;
 
   useEffect(() => {
     const animations = animValues.map((anim, i) =>
@@ -29,37 +33,53 @@ export function NativeBarChart({ data, height = 160 }: NativeBarChartProps): Rea
     Animated.parallel(animations).start();
   }, [data, maxValue, animValues]);
 
+  const formatValue = (v: number) => {
+    if (v >= 10000) return (v / 1000).toFixed(0) + 'k';
+    if (v >= 1000) return (v / 1000).toFixed(1) + 'k';
+    return v.toString();
+  };
+
   return (
     <View style={[styles.container, { height }]}>
-      <View style={styles.barsRow}>
-        {data.map((point, i) => {
-          const barHeight = animValues[i].interpolate({
-            inputRange: [0, 1],
-            outputRange: [0, height - 32],
-          });
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1 }}>
+        <View style={styles.barsRow}>
+          {data.map((point, i) => {
+            const barHeight = animValues[i].interpolate({
+              inputRange: [0, 1],
+              outputRange: ['0%', '100%'],
+            });
 
-          return (
-            <View key={point.label} style={styles.barColumn}>
-              {point.value > 0 && (
-                <Text style={styles.barValueText}>₹{point.value}</Text>
-              )}
-              <Animated.View
-                style={[
-                  styles.bar,
-                  {
-                    height: barHeight,
-                    backgroundColor:
-                      point.value === maxValue
-                        ? theme.colors.brandPrimary
-                        : theme.colors.brandAccent,
-                  },
-                ]}
-              />
-              <Text style={styles.barLabel}>{point.label}</Text>
-            </View>
-          );
-        })}
-      </View>
+            return (
+              <View key={point.label} style={styles.barColumn}>
+                <View style={styles.barValueContainer}>
+                  {point.value > 0 && (
+                    <Text style={styles.barValueText} numberOfLines={1} adjustsFontSizeToFit>
+                      ₹{formatValue(point.value)}
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.barTrack}>
+                  <Animated.View
+                    style={[
+                      styles.bar,
+                      {
+                        height: barHeight,
+                        backgroundColor:
+                          point.value === maxValue
+                            ? theme.colors.brandPrimary
+                            : theme.colors.brandAccent,
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.barLabelContainer}>
+                  <Text style={styles.barLabel}>{point.label}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
     </View>
   );
 }
@@ -67,19 +87,39 @@ export function NativeBarChart({ data, height = 160 }: NativeBarChartProps): Rea
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    paddingTop: 8,
   },
   barsRow: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: 4,
+    justifyContent: 'flex-start',
+    gap: 16,
+    paddingHorizontal: 8,
+    minWidth: '100%',
+    height: '100%',
   },
   barColumn: {
-    flex: 1,
+    width: 32,
+    height: '100%',
     alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  barValueContainer: {
+    height: 16,
     justifyContent: 'flex-end',
+    alignItems: 'center',
+    width: '120%',
+  },
+  barTrack: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  barLabelContainer: {
+    height: 20,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
   },
   bar: {
     width: '70%',
@@ -91,13 +131,12 @@ const styles = StyleSheet.create({
     color: theme.colors.ink700,
     fontSize: 9,
     fontWeight: '700',
-    marginBottom: 2,
+    textAlign: 'center',
   },
   barLabel: {
     color: theme.colors.ink500,
     fontSize: 9,
     fontWeight: '700',
-    marginTop: 4,
     textTransform: 'uppercase',
   },
 });

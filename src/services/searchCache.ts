@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { appConfig } from '../config/appConfig';
 import type { SearchCache } from '../utils/fuzzy';
 
-const CACHE_KEY = 'tp_search_cache_v1';
+const CACHE_KEY = 'tp_search_cache_v2';
 const TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 let _memCache: SearchCache | null = null;
