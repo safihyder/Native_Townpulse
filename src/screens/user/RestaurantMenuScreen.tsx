@@ -51,6 +51,9 @@ interface MenuItem {
   variants?: { name: string; price: number; isDefault?: boolean; addOns?: any[] }[];
   globalAddOns?: any[];
   prepTimeMinutes?: number;
+  isCombo?: boolean;
+  comboItems?: any[];
+  freebie?: any;
 }
 interface Restaurant {
   _id: string;
@@ -190,6 +193,10 @@ function BestsellerCard({ item, restaurant, onCustomize }: {
 
       {/* Info */}
       <Text style={ms.bsName} numberOfLines={2}>{item.name}</Text>
+      {item.freebie && <Text style={{ fontSize: 11, color: '#D97706', fontWeight: 'bold', paddingHorizontal: 12, marginTop: 2 }}>🎁 Free {item.freebie.name}!</Text>}
+      {item.isCombo && item.comboItems && (
+        <Text style={{ fontSize: 10, color: '#6B7280', paddingHorizontal: 12, marginTop: 2 }}>Includes: {item.comboItems.map(c => c.name).join(', ')}</Text>
+      )}
       <Text style={ms.bsDesc} numberOfLines={1}>
         {item.description || (item.category || '')}
       </Text>
@@ -234,6 +241,10 @@ function MenuItemRow({ item, restaurant, onCustomize }: {
           </View>
           <Text style={ms.listName} numberOfLines={1}>{item.name}</Text>
         </View>
+        {item.freebie && <Text style={{ fontSize: 11, color: '#D97706', fontWeight: 'bold', marginTop: 2 }}>🎁 Free {item.freebie.name}!</Text>}
+        {item.isCombo && item.comboItems && (
+          <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>Includes: {item.comboItems.map(c => c.name).join(', ')}</Text>
+        )}
         {item.description ? (
           <Text style={ms.listDesc} numberOfLines={1}>{item.description}</Text>
         ) : null}
@@ -279,14 +290,11 @@ export default function RestaurantMenuScreen({ restaurantId, highlightItemId, on
   useEffect(() => {
     (async () => {
       try {
-        const [restDoc, itemsJson] = await Promise.all([
-          apiFetch(`/api/restaurants/${restaurantId}`),
-          apiFetch(`/api/items/restaurant/${restaurantId}`),
-        ]);
-
+        const restDoc = await apiFetch(`/api/restaurants/${restaurantId}`);
         const r: Restaurant = restDoc;
         setRestaurant(r);
 
+        const itemsJson = await apiFetch(`/api/items/restaurant/${r._id}`);
         const items: MenuItem[] = (itemsJson.items ?? []);
         setAllItems(items);
 
@@ -477,13 +485,11 @@ export default function RestaurantMenuScreen({ restaurantId, highlightItemId, on
             {/* ── Restaurant Info Card ─────────────────────────────────── */}
             <View style={ms.infoCard}>
               {/* Promo badge */}
-              {restaurant?.isOpen !== false && (
+              {restaurant?.isOpen ?? true ? (
                 <View style={ms.promoBadge}>
-                  <Text style={ms.promoBadgeText}>
-                    {restaurant?.isOpen === false ? 'CLOSED' : 'OPEN'}
-                  </Text>
+                  <Text style={ms.promoBadgeText}>OPEN</Text>
                 </View>
-              )}
+              ) : null}
 
               {/* Restaurant name */}
               <Text style={ms.restaurantName} numberOfLines={2}>
@@ -607,14 +613,13 @@ export default function RestaurantMenuScreen({ restaurantId, highlightItemId, on
             itemId: customizeItem._id,
             name: customizeItem.name,
             price: finalPrice - addonTotal,
-            quantity: 1,
             isVeg: customizeItem.isVeg,
             category: customizeItem.category,
             variantName,
             addons,
             addonTotal,
             image: customizeItem.images?.[0],
-          });
+          } as any);
         }}
         onClose={() => setCustomizeItem(null)}
       />

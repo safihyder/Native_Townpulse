@@ -32,22 +32,7 @@ const STAGE_LABELS: Record<string, string> = {
   DELIVERED: 'Delivered ✓',
 };
 
-/** Decode a Google-style encoded polyline string to lat/lng pairs */
-function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
-  if (!encoded) return [];
-  const points: { latitude: number; longitude: number }[] = [];
-  let index = 0, lat = 0, lng = 0;
-  while (index < encoded.length) {
-    let b, shift = 0, result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lat += (result & 1) ? ~(result >> 1) : result >> 1;
-    shift = 0; result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lng += (result & 1) ? ~(result >> 1) : result >> 1;
-    points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
-  }
-  return points;
-}
+import { decodePolyline } from '../../utils/polyline';
 
 export function DeliveryHomeTab({ idToken, partnerName, mode, setMode, activeOrder, setActiveOrder }: Props) {
   const { showToast } = useToast();
@@ -187,35 +172,40 @@ export function DeliveryHomeTab({ idToken, partnerName, mode, setMode, activeOrd
       fetchFeed();
     });
 
-    // ── Internal React Native WebSocket Listener ───────────────────────────
-    const wsUrl = appConfig.apiBaseUrl.replace(/^http/, 'ws') + '/ws';
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
+    // ── Socket.IO Listener for live dispatch ───────────────────────────
+    let socketIo: any = null;
 
-    const connectWs = () => {
-      ws = new WebSocket(wsUrl);
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'incoming_dispatch') {
-            console.log('WS: Received incoming dispatch! Refreshing feed...');
-            Vibration.vibrate([0, 500, 200, 500]);
-            showToast({ type: 'info', title: 'New Order', body: 'A new delivery request just arrived!' });
-            fetchFeed();
-          }
-        } catch { }
-      };
-      ws.onclose = () => { reconnectTimer = setTimeout(connectWs, 3000); };
-      ws.onerror = () => { ws?.close(); };
+    const connectSocket = async () => {
+      try {
+        const { io } = require('socket.io-client');
+        const { getFreshFirebaseIdToken } = require('../../services/firebaseAuth');
+        let token: string | null = null;
+        try { token = await getFreshFirebaseIdToken(); } catch { }
+
+        socketIo = io(appConfig.apiBaseUrl, {
+          transports: ['websocket', 'polling'],
+          auth: token ? { token } : undefined,
+          reconnection: true,
+          reconnectionDelay: 3000,
+        });
+
+        socketIo.on('incoming_dispatch', () => {
+          console.log('[Socket.IO] Received incoming dispatch! Refreshing feed...');
+          Vibration.vibrate([0, 500, 200, 500]);
+          showToast({ type: 'info', title: 'New Order', body: 'A new delivery request just arrived!' });
+          fetchFeed();
+        });
+      } catch (err) {
+        console.log('[Socket.IO] Connection error:', err);
+      }
     };
 
-    if (mode !== 'OFFLINE') connectWs();
+    if (mode !== 'OFFLINE') connectSocket();
 
     return () => {
       clearInterval(interval);
       unsubscribe();
-      clearTimeout(reconnectTimer);
-      ws?.close();
+      socketIo?.disconnect();
     };
   }, [fetchFeed, mode]);
 

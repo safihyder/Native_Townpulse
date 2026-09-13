@@ -111,5 +111,31 @@ export async function getWalletTransactions(idToken: string, page = 1) {
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
 export async function getMyAnalytics(idToken: string) {
-  return authFetch('/api/delivery-partner/analytics', idToken);
+  try {
+    return await authFetch('/api/delivery-partner/analytics', idToken);
+  } catch {
+    // ⚠️ GET /api/delivery-partner/analytics not in pushed backend — falling back to wallet data
+    console.warn('[deliveryApi] GET /api/delivery-partner/analytics not available. Using wallet fallback.');
+    // Fallback: derive analytics from the wallet endpoint
+    const wallet = await authFetch('/api/delivery-partner/wallet', idToken);
+    const meta = wallet.meta || {};
+    const earn = wallet.earningsWallet || {};
+    const cash = wallet.cashInHandWallet || {};
+    const summary = wallet.transactionSummary || {};
+    return {
+      analytics: {
+        totalDeliveries: (summary.cashCollectionCount || 0) + (summary.onlineCommissionCount || 0),
+        totalDistanceKm: meta.totalDistanceKm || 0,
+        perKmRate: meta.perKmRate || 10,
+        totalEarnings: earn.balance || 0,
+        totalOnlineOrders: summary.onlineCommissionCount || 0,
+        totalCODOrders: summary.cashCollectionCount || 0,
+        totalCashCollected: cash.totalCashCollected || 0,
+        currentCashInHand: cash.cashInHand || 0,
+        currentEarningsBalance: earn.balance || 0,
+        avgDeliveryFormatted: '--',
+      },
+      recentTrips: [],
+    };
+  }
 }

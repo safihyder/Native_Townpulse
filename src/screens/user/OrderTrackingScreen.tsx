@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import LeafletMap from '../../components/LeafletMap';
 import { appConfig } from '../../config/appConfig';
-import { CallIcon, MessageIcon } from '../../components/SvgIcons'; // We'll need to use text icons if these aren't available, but I'll use text fallbacks just in case
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface OrderDoc {
@@ -64,22 +63,7 @@ const getStepProgress = (status: string) => {
   return 0; // Cancelled
 };
 
-/** Decode a Google-style encoded polyline string to lat/lng pairs */
-function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
-  if (!encoded) return [];
-  const points: { latitude: number; longitude: number }[] = [];
-  let index = 0, lat = 0, lng = 0;
-  while (index < encoded.length) {
-    let b, shift = 0, result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lat += (result & 1) ? ~(result >> 1) : result >> 1;
-    shift = 0; result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lng += (result & 1) ? ~(result >> 1) : result >> 1;
-    points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
-  }
-  return points;
-}
+import { decodePolyline } from '../../utils/polyline';
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function OrderTrackingScreen({ order: initialOrder, idToken, onBack }: Props) {
@@ -126,47 +110,54 @@ export default function OrderTrackingScreen({ order: initialOrder, idToken, onBa
 
   useEffect(() => { refreshOrder(); }, [refreshOrder]);
 
-  // ── WebSocket for live tracking ────────────────────────────────────────────
+  // ── Socket.IO for live tracking ─────────────────────────────────────────────
   useEffect(() => {
     if (!isActive) return;
+    let socketIo: any = null;
 
-    const wsUrl = appConfig.apiBaseUrl.replace(/^http/, 'ws') + '/ws';
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
+    const connectSocket = async () => {
+      try {
+        const { io } = require('socket.io-client');
 
-    const connect = () => {
-      ws = new WebSocket(wsUrl);
+        socketIo = io(appConfig.apiBaseUrl, {
+          transports: ['websocket', 'polling'],
+          auth: { token: idToken },
+          reconnection: true,
+          reconnectionDelay: 3000,
+        });
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'order_tracking_update' && msg.data?.orderId === order.orderId) {
-            const t = msg.data.tracking;
-            if (t?.location) {
-              const newLoc = { lat: t.location.lat, lng: t.location.lng };
-              setPartnerLoc(newLoc);
-            }
-            if (t?.etaMinutes != null) setEta(t.etaMinutes);
+        // Join the order-specific room for targeted updates
+        socketIo.on('connect', () => {
+          socketIo.emit('join_order', { orderId: order.orderId });
+        });
+
+        // Listen for live tracking snapshots from the server
+        socketIo.on('tracking_snapshot', (data: any) => {
+          if (data?.partnerLocation) {
+            setPartnerLoc({
+              lat: data.partnerLocation.lat,
+              lng: data.partnerLocation.lng,
+            });
           }
+          if (data?.etaMinutes != null) setEta(data.etaMinutes);
+        });
 
-          if (msg.type === 'order_updated' && msg.data?.orderId === order.orderId) {
+        // Listen for order status changes
+        socketIo.on('order_updated', (data: any) => {
+          if (data?.orderId === order.orderId) {
             refreshOrder();
           }
-        } catch { }
-      };
-
-      ws.onclose = () => {
-        reconnectTimer = setTimeout(connect, 3000);
-      };
-      ws.onerror = () => { ws?.close(); };
+        });
+      } catch (err) {
+        console.log('[Socket.IO] Order tracking connection error:', err);
+      }
     };
 
-    connect();
+    connectSocket();
     return () => {
-      clearTimeout(reconnectTimer);
-      ws?.close();
+      socketIo?.disconnect();
     };
-  }, [isActive, order.orderId, refreshOrder]);
+  }, [isActive, order.orderId, refreshOrder, idToken]);
 
   // ── Fallback polling for status updates ────────────────────────────────────
   useEffect(() => {
@@ -348,7 +339,7 @@ export default function OrderTrackingScreen({ order: initialOrder, idToken, onBa
                   <Text style={st.itemName}>{item.name}</Text>
                   {item.variantName ? <Text style={st.itemVariant}>{item.variantName}</Text> : null}
                 </View>
-                <Text style={st.itemPrice}>₹{item.itemTotal ?? ((item.pricing?.finalPrice ?? item.pricing?.unitPrice ?? item.finalPrice ?? item.unitPrice ?? item.price ?? 0) * item.quantity)}</Text>
+                <Text style={st.itemPrice}>₹{(item as any).itemTotal ?? ((item.pricing?.finalPrice ?? item.pricing?.unitPrice ?? item.finalPrice ?? item.unitPrice ?? item.price ?? 0) * item.quantity)}</Text>
               </View>
             ))}
           </View>
