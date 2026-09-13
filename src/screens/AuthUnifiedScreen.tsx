@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { theme } from '../theme/tokens';
 import LinearGradient from 'react-native-linear-gradient';
+import { appConfig } from '../config/appConfig';
 
 // We import all images to find the right ones; in a real scenario we'd rename them
 const IMG_1 = require('../assets/images/887afb413e71cf0163583602e8a9969c31cb6d3c.png');
@@ -17,20 +18,41 @@ interface Props {
   otpSent: boolean;
   isGoogleLinked?: boolean;
   onSendOtp: (phone: string) => void;
-  onVerifyOtp: (otp: string) => void;
+  onVerifyOtp: (otp: string, email?: string) => void;
   onGoogleSignIn: () => void;
   phoneDraft: string;
   onChangePhone: (phone: string) => void;
   otpDraft: string;
   onChangeOtp: (otp: string) => void;
+  emailDraft?: string;
+  onChangeEmail?: (email: string) => void;
 }
 
 export function AuthUnifiedScreen({
   isBusy, errorMessage, otpSent, isGoogleLinked = false,
   onSendOtp, onVerifyOtp, onGoogleSignIn,
   phoneDraft, onChangePhone,
-  otpDraft, onChangeOtp
+  otpDraft, onChangeOtp,
+  emailDraft = '', onChangeEmail = () => {}
 }: Props) {
+
+  const [isNewUser, setIsNewUser] = useState(false);
+
+  const handleSendOtp = () => {
+    // Call the parent's OTP function immediately so the UI responds instantly (shows loading spinner)
+    onSendOtp(phoneDraft);
+
+    // Fire the check asynchronously in the background
+    fetch(`${appConfig.apiBaseUrl}/api/auth/check-availability?phone=${encodeURIComponent(phoneDraft)}`)
+      .then(res => res.json())
+      .then(data => {
+        setIsNewUser(data.available === true);
+      })
+      .catch(e => {
+        // Default to asking for email if check fails just to be safe
+        setIsNewUser(true);
+      });
+  };
 
   return (
     <KeyboardAvoidingView
@@ -38,8 +60,7 @@ export function AuthUnifiedScreen({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.scrollContent} bounces={false}>
-        {/* Top Section with Gradient-like background (using a solid soft color for now) */}
-
+        {/* Top Section */}
         <LinearGradient
           colors={['#DFEFF8', '#FEEBC5']}
           start={{ x: 0, y: 0 }}
@@ -50,19 +71,11 @@ export function AuthUnifiedScreen({
             <Text style={styles.title}>{isGoogleLinked ? 'Link phone' : 'Sign in'}</Text>
             <Text style={styles.subtitle}>{isGoogleLinked ? 'Verify your phone number to continue' : 'Welcome to Town Pulse!'}</Text>
           </View>
-
-          <Image
-            source={IMG_1}
-            style={styles.topImage}
-            resizeMode="contain"
-          />
+          <Image source={IMG_1} style={styles.topImage} resizeMode="contain" />
         </LinearGradient>
 
-
         <View style={styles.formSection}>
-          {errorMessage ? (
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          ) : null}
+          {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
           {/* Phone Input */}
           <Text style={styles.label}>Phone Number</Text>
@@ -76,10 +89,9 @@ export function AuthUnifiedScreen({
             editable={!isBusy}
           />
 
-          {/* Send OTP Button (Link style) */}
           <TouchableOpacity
             style={styles.sendOtpBtn}
-            onPress={() => onSendOtp(phoneDraft)}
+            onPress={handleSendOtp}
             disabled={isBusy || phoneDraft.length < 10}
           >
             <Text style={[styles.sendOtpText, (isBusy || phoneDraft.length < 10) && { opacity: 0.5 }]}>
@@ -100,14 +112,34 @@ export function AuthUnifiedScreen({
             editable={otpSent && !isBusy}
           />
 
+          {/* Email Input for NEW users */}
+          {otpSent && isNewUser && !isGoogleLinked && (
+            <>
+              <Text style={[styles.label, { marginTop: 16 }]}>Email Address (Required)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your email"
+                placeholderTextColor={theme.colors.ink500}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                value={emailDraft}
+                onChangeText={onChangeEmail}
+                editable={!isBusy}
+              />
+            </>
+          )}
+
           {/* Bottom Image */}
           <View style={styles.bottomImageContainer}>
             <Image source={IMG_2} style={styles.bottomImage} resizeMode="contain" />
           </View>
 
           <TouchableOpacity
-            style={[styles.primaryBtn, (!otpSent || otpDraft.length !== 6 || isBusy) && { opacity: 0.5 }]}
-            onPress={() => onVerifyOtp(otpDraft)}
+            style={[
+              styles.primaryBtn, 
+              (!otpSent || otpDraft.length !== 6 || (isNewUser && emailDraft.length < 5 && !isGoogleLinked) || isBusy) && { opacity: 0.5 }
+            ]}
+            onPress={() => onVerifyOtp(otpDraft, isNewUser ? emailDraft : undefined)}
             disabled={!otpSent || otpDraft.length !== 6 || isBusy}
           >
             {isBusy ? <ActivityIndicator color="#FFF" /> : (

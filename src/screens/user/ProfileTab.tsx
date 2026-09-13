@@ -45,7 +45,7 @@ export default function ProfileTab({ session, onSignOut, onSessionUpdate, onAppl
     return n.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase() || '👤';
   };
 
-  const joinDate = new Date(session.user.createdAt || Date.now()).toLocaleDateString('en-GB');
+  const joinDate = new Date((session.user as any).createdAt || Date.now()).toLocaleDateString('en-GB');
 
   const handleSave = async () => {
     if (!name.trim()) {
