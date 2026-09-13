@@ -35,6 +35,9 @@ function TripRow({ trip, index }: { trip: any; index: number }) {
   );
 }
 
+// NOTE: GET /api/delivery-partner/analytics is NOT in the pushed backend.
+// The deliveryApi.getMyAnalytics() function automatically falls back to
+// deriving analytics from the wallet endpoint.
 export function DeliveryAnalyticsTab({ idToken }: Props) {
   const [analytics, setAnalytics] = useState<any>(null);
   const [trips, setTrips] = useState<any[]>([]);

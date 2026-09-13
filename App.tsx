@@ -58,6 +58,7 @@ function App(): React.JSX.Element {
   const [isBusy, setIsBusy] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [phoneDraft, setPhoneDraft] = useState('');
+  const [emailDraft, setEmailDraft] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [otpSession, setOtpSession] = useState<OtpSession | null>(null);
   const [dashboardSession, setDashboardSession] =
@@ -137,11 +138,12 @@ function App(): React.JSX.Element {
   const clearTransientState = () => {
     setErrorMessage(null);
     setOtpCode('');
+    setEmailDraft('');
   };
 
-  const openDashboard = async () => {
+  const openDashboard = async (userEnteredEmail?: string) => {
     try {
-      // Force reload the Firebase user to pick up any newly linked providers (e.g. phone)
+      // Force reload the Firebase user to pick up any newly linked providers
       const firebaseAuth = auth();
       if (firebaseAuth.currentUser) {
         await firebaseAuth.currentUser.reload();
@@ -155,7 +157,7 @@ function App(): React.JSX.Element {
         firebaseUid: currentUser.uid,
         fallbackName: currentUser.displayName || 'TownPulse User',
         fallbackPhone: currentUser.phoneNumber,
-        fallbackEmail: currentUser.email,
+        fallbackEmail: currentUser.email || userEnteredEmail,
         providerIds: currentUser.providerIds,
       });
 
@@ -254,7 +256,7 @@ function App(): React.JSX.Element {
         await confirmOtpCode(otpSession.confirmation, otpCode);
       }
 
-      await openDashboard();
+      await openDashboard(emailDraft);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : 'Invalid OTP. Please retry.',
@@ -339,9 +341,26 @@ function App(): React.JSX.Element {
             isBusy={isBusy}
             errorMessage={errorMessage}
             otpSent={!!otpSession || screen === 'otp'}
-            isGoogleLinked={screen === 'verify-google-phone' || (screen === 'otp' && otpSession?.mode === 'google-link')}
+        isGoogleLinked={screen === 'verify-google-phone' || (screen === 'otp' && otpSession?.mode === 'google-link')}
             onSendOtp={(phone) => startOtpFlow(phone, phoneEntryMode)}
-            onVerifyOtp={handleOtpVerification}
+            onVerifyOtp={async (code, email) => {
+              if (!otpSession?.confirmation) return;
+              setIsBusy(true);
+              setErrorMessage(null);
+              try {
+                const phoneCredential = auth.PhoneAuthProvider.credential(otpSession.confirmation.verificationId, code);
+                await auth().signInWithCredential(phoneCredential);
+
+                // Pass the user-entered email directly to openDashboard.
+                // openDashboard passes it as fallbackEmail to syncTownPulseUser,
+                // which sends it in the complete-profile body for new users.
+                await openDashboard(email || undefined);
+              } catch (error: any) {
+                setErrorMessage(error.message || 'Invalid OTP');
+              } finally {
+                setIsBusy(false);
+              }
+            }}
             onGoogleSignIn={handleGooglePress}
             phoneDraft={phoneDraft}
             onChangePhone={(value) => {
@@ -353,11 +372,16 @@ function App(): React.JSX.Element {
               setOtpCode(value);
               if (errorMessage) setErrorMessage(null);
             }}
+            emailDraft={emailDraft}
+            onChangeEmail={(value) => {
+              setEmailDraft(value);
+              if (errorMessage) setErrorMessage(null);
+            }}
           />
         )}
 
         {screen === 'dashboard' && dashboardSession && (
-          dashboardSession.user.role === 'manager' ? (
+          dashboardSession.user.role === 'restaurant_owner' ? (
             <RestaurantDashboardScreen
               currentStepLabel={currentStepLabel}
               onSignOut={handleSignOut}
@@ -368,18 +392,11 @@ function App(): React.JSX.Element {
               session={dashboardSession}
               onSignOut={handleSignOut}
             />
-          ) : dashboardSession.user.role === 'user' ? (
+          ) : (
             <UserDashboardScreen
               session={dashboardSession}
               onSignOut={handleSignOut}
               onSessionUpdate={setDashboardSession}
-            />
-          ) : (
-            <TestDashboardScreen
-              currentStepLabel={currentStepLabel}
-              isBusy={isBusy}
-              onSignOut={handleSignOut}
-              session={dashboardSession}
             />
           )
         )}

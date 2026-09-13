@@ -1,4 +1,5 @@
 import { appConfig } from '../config/appConfig';
+import { showMissingApiWarning, MISSING_APIS } from '../utils/missingApiWarning';
 
 const BASE = appConfig.apiBaseUrl;
 
@@ -22,8 +23,8 @@ async function post(path: string, body: object, token: string) {
   return json;
 }
 
-/** GET /api/settings/banners — Admin-controlled home banners */
-export const getHomeBanners = () => get('/api/settings/banners');
+/** GET /api/banners?activeOnly=true — Active home banners */
+export const getHomeBanners = () => get('/api/banners?activeOnly=true');
 
 /** GET /api/restaurants — All active restaurants (with optional cuisine filter) */
 export const getRestaurants = (params?: { search?: string; cuisine?: string; page?: number; limit?: number }) => {
@@ -55,22 +56,21 @@ export const getOrderTracking = (id: string, token: string) =>
 /** POST /api/orders — Place a new order */
 export const placeOrder = (token: string, body: object) => post('/api/orders', body, token);
 
-/** GET /api/coupons — List active coupons/vouchers */
-export const getCoupons = (token: string) => get('/api/coupons', token);
+/**
+ * Promo code listing is admin-only in the pushed backend (GET /api/promocodes).
+ * Customer-facing promo listing is not available. Codes can only be validated.
+ * See: POST /api/promocodes/validate
+ */
+export const getCoupons = async (_token: string) => ({ coupons: [], data: [] });
 
-/** GET /api/auth/addresses — List user saved addresses */
-export const getAddresses = (token: string) => get('/api/auth/addresses', token);
+/** GET /api/auth/addresses — ⚠️ NOT in pushed backend */
+export const getAddresses = (_token: string) =>
+  showMissingApiWarning(MISSING_APIS.GET_ADDRESSES).catch(() => ({ addresses: [] }));
 
-/** POST /api/auth/addresses — Add a new saved address */
-export const addAddress = (token: string, body: object) => post('/api/auth/addresses', body, token);
+/** POST /api/auth/addresses — ⚠️ NOT in pushed backend */
+export const addAddress = (_token: string, _body: object) =>
+  showMissingApiWarning(MISSING_APIS.ADD_ADDRESS).catch(() => ({ addresses: [] }));
 
-/** DELETE /api/auth/addresses/:id — Delete a saved address */
-export const deleteAddress = async (token: string, id: string) => {
-  const res = await fetch(`${appConfig.apiBaseUrl}/api/auth/addresses/${id}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Failed to delete address');
-  return json;
-};
+/** DELETE /api/auth/addresses/:id — ⚠️ NOT in pushed backend */
+export const deleteAddress = (_token: string, _id: string) =>
+  showMissingApiWarning(MISSING_APIS.DELETE_ADDRESS).catch(() => ({ addresses: [] }));

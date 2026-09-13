@@ -1,8 +1,8 @@
 /**
  * useRestaurantSocket.ts
  *
- * Uses React Native's built-in WebSocket (no npm package) to connect to
- * the TownPulse backend at /ws.
+ * Uses socket.io-client to connect to the TownPulse backend.
+ * The backend uses socket.io with Firebase auth token for authentication.
  *
  * Provides:
  *   statusMap         — Record<restaurantId, boolean>   live isOpen
@@ -10,15 +10,12 @@
  *   connected         — boolean
  *   onNewOrder        — callback ref to set; called with { restaurantId, orderId, total }
  *   onRestaurantUpdate— callback ref to set; called with { restaurantId }
- *
- * Usage:
- *   const { statusMap, onNewOrder, onRestaurantUpdate } = useRestaurantSocket();
- *   useEffect(() => { onNewOrder.current = (d) => refetchOrders(); }, []);
- *   useEffect(() => { onRestaurantUpdate.current = (d) => refetchRestaurant(); }, []);
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { appConfig } from '../config/appConfig';
+import { getFreshFirebaseIdToken } from '../services/firebaseAuth';
 
 export interface ServerTime {
   hour: number;
@@ -33,87 +30,86 @@ export interface StatusMap {
   [restaurantId: string]: boolean;
 }
 
-// Convert http(s):// → ws(s)://
-function toWsUrl(base: string): string {
-  return base.replace(/^http/, 'ws') + '/ws';
-}
-
 export function useRestaurantSocket() {
-  const wsRef = useRef<WebSocket | null>(null);
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [statusMap, setStatusMap] = useState<StatusMap>({});
   const [serverTime, setServerTime] = useState<ServerTime | null>(null);
 
-  // Caller-settable callbacks — use refs so they don't recreate the effect
   const onNewOrder = useRef<((data: { restaurantId: string; orderId: string; total: number }) => void) | null>(null);
   const onRestaurantUpdate = useRef<((data: { restaurantId: string }) => void) | null>(null);
 
   useEffect(() => {
-    const WS_URL = toWsUrl(appConfig.apiBaseUrl);
     let destroyed = false;
 
-    function connect() {
+    async function connect() {
       if (destroyed) return;
-      const ws = new WebSocket(WS_URL);
-      wsRef.current = ws;
 
-      ws.onopen = () => {
+      let token: string | null = null;
+      try {
+        token = await getFreshFirebaseIdToken();
+      } catch { /* will connect without auth */ }
+
+      const socket = io(appConfig.apiBaseUrl, {
+        transports: ['websocket', 'polling'],
+        auth: token ? { token } : undefined,
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 3000,
+      });
+
+      socketRef.current = socket;
+
+      socket.on('connect', () => {
         if (!destroyed) {
-          console.log('[WS] Connected to', WS_URL);
+          console.log('[Socket.IO] Connected');
           setConnected(true);
         }
-      };
+      });
 
-      ws.onmessage = (event) => {
-        if (destroyed) return;
-        try {
-          const msg = JSON.parse(event.data as string);
-          switch (msg.type) {
-            case 'server_time':
-              setServerTime(msg.data);
-              break;
-
-            case 'status_update':
-              setStatusMap(prev => {
-                const next = { ...prev };
-                for (const u of (msg.data as Array<{ restaurantId: string; isOpen: boolean }>)) {
-                  next[u.restaurantId] = u.isOpen;
-                }
-                return next;
-              });
-              break;
-
-            case 'new_order':
-              onNewOrder.current?.(msg.data);
-              break;
-
-            case 'restaurant_updated':
-              onRestaurantUpdate.current?.(msg.data);
-              break;
-          }
-        } catch { /* ignore parse errors */ }
-      };
-
-      ws.onerror = () => { /* handled by onclose */ };
-
-      ws.onclose = () => {
-        setConnected(false);
+      socket.on('disconnect', () => {
         if (!destroyed) {
-          // Auto-reconnect after 5 s
-          retryTimer.current = setTimeout(connect, 5000);
+          console.log('[Socket.IO] Disconnected');
+          setConnected(false);
         }
-      };
+      });
+
+      socket.on('server_time', (data: ServerTime) => {
+        if (!destroyed) setServerTime(data);
+      });
+
+      socket.on('status_update', (data: Array<{ restaurantId: string; isOpen: boolean }>) => {
+        if (!destroyed) {
+          setStatusMap(prev => {
+            const next = { ...prev };
+            for (const u of data) {
+              next[u.restaurantId] = u.isOpen;
+            }
+            return next;
+          });
+        }
+      });
+
+      socket.on('new_order', (data: any) => {
+        if (!destroyed) onNewOrder.current?.(data);
+      });
+
+      socket.on('restaurant_updated', (data: any) => {
+        if (!destroyed) onRestaurantUpdate.current?.(data);
+      });
+
+      socket.on('connect_error', (err: Error) => {
+        console.log('[Socket.IO] Connect error:', err.message);
+      });
     }
 
     connect();
 
     return () => {
       destroyed = true;
-      if (retryTimer.current) clearTimeout(retryTimer.current);
-      wsRef.current?.close();
+      socketRef.current?.disconnect();
     };
   }, []);
 
-  return { statusMap, serverTime, connected, onNewOrder, onRestaurantUpdate };
+  return { statusMap, serverTime, connected, onNewOrder, onRestaurantUpdate, socketRef };
 }

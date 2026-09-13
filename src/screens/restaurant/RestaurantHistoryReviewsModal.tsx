@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 type Tab = 'history' | 'reviews';
 
@@ -40,6 +40,13 @@ export function RestaurantHistoryReviewsModal({ visible, onClose, apiFetch, rest
   }, [visible, activeTab, restaurantId]);
 
   const fetchOrders = async (page: number) => {
+    // ⚠️ GET /api/orders/restaurant/history is NOT in the pushed backend
+    Alert.alert(
+      '⚠️ API Not Available',
+      'GET /api/orders/restaurant/history is not available in the pushed backend.\n\nPurpose: Fetches paginated restaurant order history for analytics and revenue charts.\n\nUsed by: RestaurantHistoryReviewsModal',
+      [{ text: 'OK' }]
+    );
+    return;
     if (loading) return;
     setLoading(true);
     try {

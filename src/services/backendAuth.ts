@@ -81,8 +81,9 @@ async function postJson<TResponse>(
   const parsed = responseText ? JSON.parse(responseText) : {};
 
   if (!response.ok) {
+    const detailedError = parsed?.error ? ` (${parsed.error})` : '';
     throw new Error(
-      parsed?.message || `Backend request failed with status ${response.status}.`,
+      (parsed?.message || `Backend request failed with status ${response.status}.`) + detailedError
     );
   }
 
@@ -157,7 +158,7 @@ export async function syncTownPulseUser({
     idToken,
     {
       name: fallbackName?.trim() || 'TownPulse User',
-      email: fallbackEmail || '',
+      email: fallbackEmail || `${firebaseUid}@townpulse.local`,
       phone: fallbackPhone || '',
       address: {
         city: appConfig.placeholderAddressCity,

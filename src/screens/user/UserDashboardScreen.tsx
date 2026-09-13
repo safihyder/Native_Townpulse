@@ -60,6 +60,7 @@ function DashboardInner({ session, onSignOut, onSessionUpdate }: Props) {
     return (
       <CartScreen
         idToken={idToken}
+        user={user}
         onBack={() => setScreen('home')}
         onOrderPlaced={() => { setScreen('orders'); }}
       />

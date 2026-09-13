@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
-  FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Switch,
+  Alert, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Switch,
   Text, TextInput, Vibration, View,
 } from 'react-native';
 import { useToast } from '../../context/ToastContext';
@@ -157,18 +157,12 @@ export function RestaurantSettingsTab({ restaurant, setRestaurant, isRestaurantO
   };
 
   const handleRemoveBannerImage = async (imageUrl: string) => {
-    try {
-      const token = await getToken();
-      const res = await fetch(`${appConfig.apiBaseUrl}/api/restaurants/${restaurant.restaurantId}/banner/remove`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.message);
-      setRestaurant((prev: any) => prev ? { ...prev, banner: json.restaurant.banner } : prev);
-      showToast({ type: 'success', title: 'Removed', body: 'Banner image removed' });
-    } catch (err: any) { showToast({ type: 'error', title: 'Error', body: err.message }); }
+    Alert.alert(
+      '⚠️ API Not Available',
+      'PATCH /api/restaurants/:id/banner/remove is not available in the pushed backend.\n\nPurpose: Removes a specific banner image from the restaurant profile.\n\nUsed by: RestaurantSettingsTab',
+      [{ text: 'OK' }]
+    );
+    return;
   };
 
   const pickBannersLocally = async () => {

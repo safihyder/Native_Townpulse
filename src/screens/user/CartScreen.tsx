@@ -21,9 +21,11 @@ import { LocationSelectorModal } from './LocationSelectorModal';
 import { useToast } from '../../context/ToastContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { PressableScale } from '../../components/PressableScale';
+import { showMissingApiWarning, MISSING_APIS } from '../../utils/missingApiWarning';
 
 interface Props {
   idToken: string;
+  user?: { email?: string; phone?: string; name?: string };
   onBack: () => void;
   onOrderPlaced: () => void;
   fulfillmentType?: 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY';
@@ -48,7 +50,7 @@ const DELIVERY_FEE = 30;
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function fetchCoupons(idToken: string, restaurantId: string | null): Promise<ApiCoupon[]> {
   const qs = restaurantId ? `?restaurantId=${restaurantId}` : '';
-  const res = await fetch(`${appConfig.apiBaseUrl}/api/coupons${qs}`, {
+  const res = await fetch(`${appConfig.apiBaseUrl}/api/promocodes${qs}`, {
     headers: { Authorization: `Bearer ${idToken}` },
   });
   const json = await res.json();
@@ -58,10 +60,10 @@ async function fetchCoupons(idToken: string, restaurantId: string | null): Promi
 async function validateCoupon(
   idToken: string, code: string, subtotal: number, restaurantId: string | null,
 ): Promise<{ coupon: ApiCoupon; discountAmount: number }> {
-  const res = await fetch(`${appConfig.apiBaseUrl}/api/coupons/validate`, {
+  const res = await fetch(`${appConfig.apiBaseUrl}/api/promocodes/validate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ code, subtotal, restaurantId }),
+    body: JSON.stringify({ code, orderValue: subtotal, restaurantId }),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.message || 'Invalid coupon');
@@ -81,7 +83,7 @@ function ZigzagBorder() {
 }
 
 // ── Main Screen ────────────────────────────────────────────────────────────────
-export default function CartScreen({ idToken, onBack, onOrderPlaced, fulfillmentType = 'DELIVERY' }: Props) {
+export default function CartScreen({ idToken, user, onBack, onOrderPlaced, fulfillmentType = 'DELIVERY' }: Props) {
   const { cart, itemCount, subtotal, setQty, clearCart, setDeliveryAddress } = useCart();
   const { showToast } = useToast();
   const [payment, setPayment] = useState<PaymentMode>('CASH');
@@ -101,18 +103,25 @@ export default function CartScreen({ idToken, onBack, onOrderPlaced, fulfillment
     if (cart.restaurantId) {
       fetchCoupons(idToken, cart.restaurantId).then(setCoupons);
       
-      // Fetch tax rate from backend settings
-      fetch(`${appConfig.apiBaseUrl}/api/settings/FINANCE?restaurantId=${cart.restaurantId}`, {
-        headers: { Authorization: `Bearer ${idToken}` }
+      // Fetch tax rate from checkout preview
+      fetch(`${appConfig.apiBaseUrl}/api/orders/checkout-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({
+          restaurantId: cart.restaurantId,
+          items: cart.items.map(i => ({ itemId: i.itemId, name: i.name, quantity: i.quantity, addons: i.addons || [] })),
+          fulfillment: { deliveryFee: deliveryFee, platformFee: 0 },
+        }),
       })
       .then(res => res.json())
       .then(json => {
-        if (json.success && json.data && json.data.taxRate !== undefined) {
-          // taxRate might be 0.05 or 5. Assuming decimal.
-          setTaxRate(json.data.taxRate);
+        if (json.success && json.data && json.data.pricing && json.data.pricing.taxTotal !== undefined) {
+          const fetchedTaxTotal = json.data.pricing.taxTotal;
+          const currentSubtotal = cart.items.reduce((acc, i) => acc + (i.price + (i.addonTotal || 0)) * i.quantity, 0);
+          setTaxRate(currentSubtotal > 0 ? fetchedTaxTotal / currentSubtotal : 0);
         }
       })
-      .catch(err => console.warn('Failed to fetch tax rate', err));
+      .catch(err => console.warn('Failed to fetch checkout preview', err));
 
       // Fetch restaurant delivery fee
       fetch(`${appConfig.apiBaseUrl}/api/restaurants/${cart.restaurantId}`, {
@@ -234,28 +243,20 @@ export default function CartScreen({ idToken, onBack, onOrderPlaced, fulfillment
             amount: rzJson.amount,
             name: 'TownPulse',
             order_id: rzJson.razorpayOrderId,
-            prefill: { email: 'user@example.com', contact: '9999999999', name: 'User' },
+            prefill: { email: user?.email || 'user@example.com', contact: user?.phone || '9999999999', name: user?.name || 'User' },
             theme: { color: '#B71C1C' }
           };
 
           const data = await RazorpayCheckout.open(options);
 
-          // Verify Payment
-          const vRes = await fetch(`${appConfig.apiBaseUrl}/api/payments/verify-payment/${newOrder.orderId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-            body: JSON.stringify(data)
-          });
-          const vJson = await vRes.json();
-          if (!vRes.ok || !vJson.success) throw new Error(vJson.message || 'Payment verification failed');
+          // ⚠️ POST /api/payments/verify-payment is NOT in the pushed backend
+          await showMissingApiWarning(MISSING_APIS.VERIFY_PAYMENT).catch(() => {});
 
           orderConfirmedMessage = `Order #${newOrder?.orderId ?? 'confirmed'} placed.\nPayment: Online Successful`;
         } catch (err: any) {
           try {
-            await fetch(`${appConfig.apiBaseUrl}/api/orders/${newOrder.orderId}/cancel-payment`, {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${idToken}` }
-            });
+            // ⚠️ POST /api/orders/:id/cancel-payment is NOT in the pushed backend
+            console.warn('[CartScreen] cancel-payment endpoint not available in pushed backend');
           } catch (cancelErr) {
             console.warn('Failed to cancel unpaid order:', cancelErr);
           }

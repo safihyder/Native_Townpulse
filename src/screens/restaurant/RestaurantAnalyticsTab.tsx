@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, TextInput, Modal, Dimensions, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, TextInput, Modal, Dimensions, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { NativeBarChart } from '../../components/NativeBarChart';
 import { NativeLineChart } from '../../components/NativeLineChart';
 
@@ -62,6 +62,14 @@ export function RestaurantAnalyticsTab({ dashboard, apiFetch }: Props) {
 
     let cancelled = false;
     const loadAllPages = async () => {
+      // ⚠️ GET /api/orders/restaurant/history is NOT in the pushed backend
+      Alert.alert(
+        '⚠️ API Not Available',
+        'GET /api/orders/restaurant/history is not available in the pushed backend.\n\nPurpose: Fetches paginated restaurant order history for analytics and revenue charts.\n\nUsed by: RestaurantAnalyticsTab',
+        [{ text: 'OK' }]
+      );
+      return;
+
       let accumulated: SlimOrder[] = [];
       const limit = 500; // Larger limit for fewer network roundtrips
 

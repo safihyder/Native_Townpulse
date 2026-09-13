@@ -26,13 +26,21 @@ interface StoredCache {
 
 async function fetchFromNetwork(): Promise<SearchCache> {
   const BASE = appConfig.apiBaseUrl;
-  const [restRes, itemsRes] = await Promise.all([
-    fetch(`${BASE}/api/restaurants?limit=100`).then(r => r.json()),
-    fetch(`${BASE}/api/items/all-public`).then(r => r.json()),
-  ]);
+  const restRes = await fetch(`${BASE}/api/restaurants?limit=100`).then(r => r.json());
+
+  // ⚠️ /api/items/all-public does NOT exist in the pushed backend.
+  // Silently degrade: search will only cover restaurants, not individual dishes.
+  let items: any[] = [];
+  try {
+    const itemsRes = await fetch(`${BASE}/api/items/all-public`).then(r => r.json());
+    items = itemsRes.items ?? [];
+  } catch {
+    console.warn('[searchCache] GET /api/items/all-public not available in pushed backend. Dish search disabled.');
+  }
+
   return {
     restaurants: restRes.restaurants ?? [],
-    items: itemsRes.items ?? [],
+    items,
   };
 }
 

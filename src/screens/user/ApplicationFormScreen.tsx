@@ -74,7 +74,7 @@ export default function ApplicationFormScreen({ idToken, onBack }: Props) {
         return;
       }
       if (dCnic.length !== 13) {
-        showToast({ type: 'error', title: 'Error', body: 'Aadhar must be exactly 12 digits' });
+        showToast({ type: 'error', title: 'Error', body: 'CNIC number must be exactly 13 digits' });
         return;
       }
     }

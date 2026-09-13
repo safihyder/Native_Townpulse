@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   overlayTouchable: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill as object,
   },
   dialog: {
     backgroundColor: '#FFFFFF',

@@ -139,7 +139,7 @@ export function UserHomeTab({ idToken, userName, cartItemCount = 0, onOpenRestau
       ]);
       if (bannerRes.banners) setBanners(bannerRes.banners);
       setRestaurants(restRes.restaurants ?? []);
-      setCoupons(couponRes.coupons ?? []);
+      setCoupons(couponRes.coupons ?? (couponRes as any).data ?? []);
     } catch { /* silent */ }
     finally { setLoading(false); }
   }, [idToken]);
@@ -489,7 +489,7 @@ const s = StyleSheet.create({
 
   // Header
   header: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#ffbb00ea',
     paddingTop: 48,
     paddingHorizontal: 20,
     paddingBottom: 12,
